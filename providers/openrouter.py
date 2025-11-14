@@ -50,7 +50,7 @@ class OpenRouterProvider(OpenAICompatibleProvider):
             api_key: OpenRouter API key
             **kwargs: Additional configuration
         """
-        base_url = "https://openrouter.ai/api/v1"
+        base_url = kwargs.pop("base_url", None) or get_env("OPENROUTER_BASE_URL") or "https://openrouter.ai/api/v1"
         self._alias_cache: dict[str, str] = {}
         super().__init__(api_key, base_url=base_url, **kwargs)
 
