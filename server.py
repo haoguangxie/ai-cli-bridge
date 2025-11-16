@@ -672,6 +672,11 @@ async def handle_list_tools() -> list[Tool]:
             logger.debug(f"Skipping tool '{tool.name}' - requires API provider")
             continue
 
+        # In clink-only mode (no API), only show clink tool
+        if not has_api_providers and tool.name != 'clink':
+            logger.debug(f"Skipping tool '{tool.name}' - clink-only mode")
+            continue
+
         # Get optional annotations from the tool
         annotations = tool.get_annotations()
         tool_annotations = ToolAnnotations(**annotations) if annotations else None
