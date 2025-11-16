@@ -1324,8 +1324,25 @@ async def handle_list_prompts() -> list[Prompt]:
     logger.debug("MCP client requested prompt list")
     prompts = []
 
+    # Check if we have any API providers configured
+    from providers.registry import ModelProviderRegistry
+    try:
+        has_api_providers = len(ModelProviderRegistry.get_available_models()) > 0
+    except Exception as e:
+        logger.debug(f"Failed to check API providers: {e}")
+        has_api_providers = False
+
     # Add a prompt for each tool with rich templates
     for tool_name, tool in TOOLS.items():
+        # Skip tools that require models if no API providers are configured
+        if tool.requires_model() and not has_api_providers:
+            logger.debug(f"Skipping prompt for '{tool_name}' - requires API provider")
+            continue
+
+        # In clink-only mode (no API), only show clink prompt
+        if not has_api_providers and tool_name != 'clink':
+            logger.debug(f"Skipping prompt for '{tool_name}' - clink-only mode")
+            continue
         if tool_name in PROMPT_TEMPLATES:
             # Use the rich template
             template_info = PROMPT_TEMPLATES[tool_name]
@@ -1346,14 +1363,15 @@ async def handle_list_prompts() -> list[Prompt]:
                 )
             )
 
-    # Add special "continue" prompt
-    prompts.append(
-        Prompt(
-            name="continue",
-            description="Continue the previous conversation using the chat tool",
-            arguments=[],
+    # Add special "continue" prompt (only if API providers are available)
+    if has_api_providers:
+        prompts.append(
+            Prompt(
+                name="continue",
+                description="Continue the previous conversation using the chat tool",
+                arguments=[],
+            )
         )
-    )
 
     logger.debug(f"Returning {len(prompts)} prompts to MCP client")
     return prompts
