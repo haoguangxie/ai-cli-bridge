@@ -787,6 +787,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         logger.info(f"Executing tool '{name}' with {len(arguments)} parameter(s)")
         tool = TOOLS[name]
 
+        # Skip model resolution for tools that don't require models (e.g., planner, clink)
+        if not tool.requires_model():
+            logger.debug(f"Tool {name} doesn't require model resolution - executing directly")
+            return await tool.execute(arguments)
+
         # EARLY MODEL RESOLUTION AT MCP BOUNDARY
         # Resolve model before passing to tool - this ensures consistent model handling
         # NOTE: Consensus tool is exempt as it handles multiple models internally
@@ -804,15 +809,6 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             logger.info(f"Parsed model format - model: '{model_name}', option: '{model_option}'")
         else:
             logger.info(f"Parsed model format - model: '{model_name}'")
-
-        # Consensus tool handles its own model configuration validation
-        # No special handling needed at server level
-
-        # Skip model resolution for tools that don't require models (e.g., planner)
-        if not tool.requires_model():
-            logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
-            # Execute tool directly without model context
-            return await tool.execute(arguments)
 
         # Handle auto mode at MCP boundary - resolve to specific model
         if model_name.lower() == "auto":
