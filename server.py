@@ -540,17 +540,10 @@ def configure_providers():
     if registered_providers:
         logger.info(f"Registered providers: {', '.join(registered_providers)}")
 
-    # Require at least one valid provider
+    # Allow server to start without API providers (for clink-only mode)
     if not valid_providers:
-        raise ValueError(
-            "At least one API configuration is required. Please set either:\n"
-            "- GEMINI_API_KEY for Gemini models\n"
-            "- OPENAI_API_KEY for OpenAI models\n"
-            "- XAI_API_KEY for X.AI GROK models\n"
-            "- DIAL_API_KEY for DIAL models\n"
-            "- OPENROUTER_API_KEY for OpenRouter (multiple models)\n"
-            "- CUSTOM_API_URL for local models (Ollama, vLLM, etc.)"
-        )
+        logger.warning("No API providers configured - only tools that don't require models will be available")
+        logger.info("To enable API-based tools, configure at least one provider (GEMINI_API_KEY, OPENAI_API_KEY, etc.)")
 
     logger.info(f"Available providers: {', '.join(valid_providers)}")
 
@@ -613,7 +606,7 @@ def configure_providers():
     # Check if auto mode has any models available after restrictions
     from config import IS_AUTO_MODE
 
-    if IS_AUTO_MODE:
+    if IS_AUTO_MODE and valid_providers:
         available_models = ModelProviderRegistry.get_available_models(respect_restrictions=True)
         if not available_models:
             logger.error(
@@ -664,8 +657,21 @@ async def handle_list_tools() -> list[Tool]:
         logger.debug(f"Could not log client info during list_tools: {e}")
     tools = []
 
+    # Check if we have any API providers configured
+    from providers.registry import ModelProviderRegistry
+    try:
+        has_api_providers = len(ModelProviderRegistry.get_available_models()) > 0
+    except Exception as e:
+        logger.debug(f"Failed to check API providers: {e}")
+        has_api_providers = False
+
     # Add all registered AI-powered tools from the TOOLS registry
     for tool in TOOLS.values():
+        # Skip tools that require models if no API providers are configured
+        if tool.requires_model() and not has_api_providers:
+            logger.debug(f"Skipping tool '{tool.name}' - requires API provider")
+            continue
+
         # Get optional annotations from the tool
         annotations = tool.get_annotations()
         tool_annotations = ToolAnnotations(**annotations) if annotations else None
@@ -810,6 +816,21 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
 
         # Handle auto mode at MCP boundary - resolve to specific model
         if model_name.lower() == "auto":
+            # Check if any models are available
+            available_models = ModelProviderRegistry.get_available_models(respect_restrictions=True)
+            if not available_models:
+                error_message = (
+                    f"Cannot use auto mode for '{name}' - no API providers configured. "
+                    f"Please configure at least one API provider (GEMINI_API_KEY, OPENAI_API_KEY, etc.)"
+                )
+                error_output = ToolOutput(
+                    status="error",
+                    content=error_message,
+                    content_type="text",
+                    metadata={"tool_name": name, "requested_model": model_name},
+                )
+                raise ToolExecutionError(error_output.model_dump_json())
+
             # Get tool category to determine appropriate model
             tool_category = tool.get_model_category()
             resolved_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
