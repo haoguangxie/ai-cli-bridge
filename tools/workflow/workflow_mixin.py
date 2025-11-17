@@ -1335,9 +1335,9 @@ class BaseWorkflowMixin(ABC):
             if not self.requires_expert_analysis():
                 # Tool is self-contained (like planner)
                 response_data["status"] = f"{self.get_name()}_complete"
-                response_data["next_steps"] = (
-                    f"{self.get_name().capitalize()} work complete. Present results to the user."
-                )
+                response_data[
+                    "next_steps"
+                ] = f"{self.get_name().capitalize()} work complete. Present results to the user."
             else:
                 # Local work was sufficient for tools that support expert analysis
                 response_data["status"] = "local_work_complete"

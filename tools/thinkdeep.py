@@ -223,9 +223,9 @@ class ThinkDeepTool(WorkflowTool):
                 "All aspects have been thoroughly considered and conclusions are definitive."
             )
         elif not request.next_step_required:
-            response_data["completion_message"] = (
-                "Deep thinking analysis phase complete. Expert validation will provide additional insights and recommendations."
-            )
+            response_data[
+                "completion_message"
+            ] = "Deep thinking analysis phase complete. Expert validation will provide additional insights and recommendations."
 
         return response_data
 

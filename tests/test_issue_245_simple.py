@@ -15,7 +15,6 @@ def test_issue_245_custom_openai_temperature_ignored():
     with patch("utils.model_restrictions.get_restriction_service") as mock_restriction:
         with patch("providers.openai_compatible.OpenAI") as mock_openai:
             with patch("providers.registries.openrouter.OpenRouterModelRegistry") as mock_registry_class:
-
                 # Mock restriction service
                 mock_service = Mock()
                 mock_service.is_allowed.return_value = True

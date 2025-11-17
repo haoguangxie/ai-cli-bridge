@@ -418,9 +418,9 @@ of the evidence, even when it strongly points in one direction.""",
             # After CLI Agent's initial analysis, prepare to consult first model
             response_data["status"] = "consulting_models"
             response_data["next_model"] = self.models_to_consult[0] if self.models_to_consult else None
-            response_data["next_steps"] = (
-                "Your initial analysis is complete. The tool will now consult the specified models."
-            )
+            response_data[
+                "next_steps"
+            ] = "Your initial analysis is complete. The tool will now consult the specified models."
         elif current_idx < len(self.models_to_consult):
             next_model = self.models_to_consult[current_idx]
             response_data["status"] = "consulting_next_model"

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from clink import get_registry
 from clink.agents import AgentOutput, CLIAgentError, create_agent
+from clink.cli_selector import CLISelector
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from config import TEMPERATURE_BALANCED
 from tools.models import ToolModelCategory, ToolOutput
@@ -66,10 +67,9 @@ class CLinkTool(SimpleTool):
         self._cli_names = self._registry.list_clients()
         self._role_map: dict[str, list[str]] = {name: self._registry.list_roles(name) for name in self._cli_names}
         self._all_roles: list[str] = sorted({role for roles in self._role_map.values() for role in roles})
-        if "gemini" in self._cli_names:
-            self._default_cli_name = "gemini"
-        else:
-            self._default_cli_name = self._cli_names[0] if self._cli_names else None
+        # Initialize intelligent CLI selector
+        self._cli_selector = CLISelector(self._registry) if self._cli_names else None
+        self._default_cli_name = self._cli_selector._get_default_cli() if self._cli_selector else None
         self._active_system_prompt: str = ""
         super().__init__()
 
@@ -78,8 +78,9 @@ class CLinkTool(SimpleTool):
 
     def get_description(self) -> str:
         return (
-            "Link a request to an external AI CLI (Gemini CLI, Qwen CLI, etc.) through Zen MCP to reuse "
-            "their capabilities inside existing workflows."
+            "Link a request to an external AI CLI (Claude CLI, Codex CLI, etc.) through Zen MCP to reuse "
+            "their capabilities inside existing workflows. Automatically selects the most appropriate CLI "
+            "based on task type: Codex for code review/analysis, Claude for implementation/planning."
         )
 
     def get_annotations(self) -> dict[str, Any]:
@@ -169,9 +170,20 @@ class CLinkTool(SimpleTool):
         if path_error:
             self._raise_tool_error(path_error)
 
-        selected_cli = request.cli_name or self._default_cli_name
-        if not selected_cli:
-            self._raise_tool_error("No CLI clients are configured for clink.")
+        # Use intelligent CLI selection
+        if self._cli_selector:
+            try:
+                selected_cli = self._cli_selector.select_cli(
+                    prompt=request.prompt,
+                    role=request.role,
+                    requested_cli=request.cli_name,
+                )
+            except ValueError as exc:
+                self._raise_tool_error(str(exc))
+        else:
+            selected_cli = request.cli_name or self._default_cli_name
+            if not selected_cli:
+                self._raise_tool_error("No CLI clients are configured for clink.")
 
         try:
             client_config = self._registry.get_client(selected_cli)
@@ -439,8 +451,22 @@ class CLinkTool(SimpleTool):
         raise ToolExecutionError(error_output.model_dump_json())
 
     def _agent_capabilities_guidance(self) -> str:
+        # Get the selected CLI from current execution context
+        selected_cli = "the CLI"
+        if hasattr(self, "_current_arguments") and self._current_arguments:
+            request = self.get_request_model()(**self._current_arguments)
+            if self._cli_selector:
+                try:
+                    selected_cli = self._cli_selector.select_cli(
+                        prompt=request.prompt,
+                        role=request.role,
+                        requested_cli=request.cli_name,
+                    )
+                except (ValueError, KeyError):
+                    pass
+
         return (
-            "You are operating through the Gemini CLI agent. You have access to your full suite of "
+            f"You are operating through the {selected_cli.upper()} CLI agent. You have access to your full suite of "
             "CLI capabilities—including launching web searches, reading files, and using any other "
             "available tools. Gather current information yourself and deliver the final answer without "
             "asking the Zen MCP host to perform searches or file reads."

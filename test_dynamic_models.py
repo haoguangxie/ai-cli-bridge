@@ -38,7 +38,7 @@ def test_dynamic_models():
             test_model = models[0]
             capabilities = registry.get_capabilities(test_model)
             if capabilities:
-                print(f"\n✓ Model capabilities test passed")
+                print("\n✓ Model capabilities test passed")
                 print(f"  Model: {capabilities.model_name}")
                 print(f"  Context: {capabilities.context_window}")
                 print(f"  Max output: {capabilities.max_output_tokens}")
@@ -48,6 +48,7 @@ def test_dynamic_models():
     except Exception as e:
         print(f"\n✗ Error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

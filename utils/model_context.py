@@ -90,7 +90,27 @@ class ModelContext:
     def capabilities(self) -> ModelCapabilities:
         """Get model capabilities lazily."""
         if self._capabilities is None:
-            self._capabilities = self.provider.get_capabilities(self.model_name)
+            # Try to get capabilities from provider
+            try:
+                provider = ModelProviderRegistry.get_provider_for_model(self.model_name)
+                if provider:
+                    self._capabilities = provider.get_capabilities(self.model_name)
+            except Exception:
+                pass
+
+            # If no provider available, use default capabilities for token estimation
+            if self._capabilities is None:
+                logger.debug(
+                    f"No provider available for model '{self.model_name}' - using default capabilities for token estimation"
+                )
+                # Use Gemini 2.5 Flash as default for token estimation
+                self._capabilities = ModelCapabilities(
+                    model_name=self.model_name,
+                    context_window=1_048_576,  # 1M tokens
+                    max_output_tokens=8192,
+                    supports_vision=False,
+                    supports_thinking=False,
+                )
         return self._capabilities
 
     def calculate_token_allocation(self, reserved_for_response: Optional[int] = None) -> TokenAllocation:

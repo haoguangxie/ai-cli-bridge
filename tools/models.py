@@ -124,9 +124,9 @@ class RefactorOpportunity(BaseModel):
 class RefactorAction(BaseModel):
     """Next action for Agent to implement refactoring"""
 
-    action_type: Literal["EXTRACT_METHOD", "SPLIT_CLASS", "MODERNIZE_SYNTAX", "REORGANIZE_CODE", "DECOMPOSE_FILE"] = (
-        Field(..., description="Type of action to perform")
-    )
+    action_type: Literal[
+        "EXTRACT_METHOD", "SPLIT_CLASS", "MODERNIZE_SYNTAX", "REORGANIZE_CODE", "DECOMPOSE_FILE"
+    ] = Field(..., description="Type of action to perform")
     target_file: str = Field(..., description="Absolute path to target file")
     source_lines: str = Field(..., description="Line range (e.g., '45-67')")
     description: str = Field(..., description="Step-by-step action description for CLI Agent")

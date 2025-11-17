@@ -406,9 +406,9 @@ class PlannerTool(WorkflowTool):
         else:
             # Normal flow for simple plans or later steps
             remaining_steps = request.total_steps - request.step_number
-            response_data["next_steps"] = (
-                f"Continue with step {request.step_number + 1}. Approximately {remaining_steps} steps remaining."
-            )
+            response_data[
+                "next_steps"
+            ] = f"Continue with step {request.step_number + 1}. Approximately {remaining_steps} steps remaining."
 
         return response_data
 
@@ -447,9 +447,9 @@ class PlannerTool(WorkflowTool):
         # Add planner-specific output instructions for final steps
         if not request.next_step_required:
             response_data["planning_complete"] = True
-            response_data["plan_summary"] = (
-                f"COMPLETE PLAN: {request.step} (Total {request.total_steps} steps completed)"
-            )
+            response_data[
+                "plan_summary"
+            ] = f"COMPLETE PLAN: {request.step} (Total {request.total_steps} steps completed)"
             response_data["output"] = {
                 "instructions": "This is a structured planning response. Present the step_content as the main planning analysis. If next_step_required is true, continue with the next step. If planning_complete is true, present the complete plan in a well-structured format with clear sections, headings, numbered steps, and visual elements like ASCII charts for phases/dependencies. Use bullet points, sub-steps, sequences, and visual organization to make complex plans easy to understand and follow. IMPORTANT: Do NOT use emojis - use clear text formatting and ASCII characters only. Do NOT mention time estimates or costs unless explicitly requested.",
                 "format": "step_by_step_planning",

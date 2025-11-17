@@ -226,9 +226,7 @@ if __name__ == "__main__":
 
         # Check for SSRF security restriction - this is expected for local URLs
         if "restricted IP address" in response and "security risk (SSRF)" in response:
-            self.logger.info(
-                f"✅ Custom URL routing working - {test_name} correctly attempted to connect to custom API"
-            )
+            self.logger.info(f"✅ Custom URL routing working - {test_name} correctly attempted to connect to custom API")
             self.logger.info("   (Connection blocked by SSRF protection, which is expected for local URLs)")
             return True
 

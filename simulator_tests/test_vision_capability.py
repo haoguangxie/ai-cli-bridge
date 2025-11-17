@@ -91,9 +91,7 @@ class VisionCapabilityTest(BaseSimulatorTest):
                 return False
 
             if "triangle" not in response1_lower:
-                self.logger.error(
-                    f"  ❌ O3 did not identify triangle in file path test. Response: {response1[:200]}..."
-                )
+                self.logger.error(f"  ❌ O3 did not identify triangle in file path test. Response: {response1[:200]}...")
                 return False
 
             self.logger.info("  ✅ O3 correctly identified file path image as triangle")

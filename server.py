@@ -659,6 +659,7 @@ async def handle_list_tools() -> list[Tool]:
 
     # Check if we have any API providers configured
     from providers.registry import ModelProviderRegistry
+
     try:
         has_api_providers = len(ModelProviderRegistry.get_available_models()) > 0
     except Exception as e:
@@ -673,7 +674,7 @@ async def handle_list_tools() -> list[Tool]:
             continue
 
         # In clink-only mode (no API), only show clink tool
-        if not has_api_providers and tool.name != 'clink':
+        if not has_api_providers and tool.name != "clink":
             logger.debug(f"Skipping tool '{tool.name}' - clink-only mode")
             continue
 
@@ -1166,6 +1167,7 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
 
         from providers.registry import ModelProviderRegistry
 
+        # Validate that the model is available with current API keys
         provider = ModelProviderRegistry.get_provider_for_model(model_context.model_name)
         if provider is None:
             fallback_model = None
@@ -1194,6 +1196,8 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
             arguments["_model_context"] = model_context
             arguments["_resolved_model_name"] = fallback_model
     else:
+        # For tools that don't require models (like clink), create a model context
+        # for token estimation only - no provider validation needed
         if model_context is None:
             from providers.registry import ModelProviderRegistry
 
@@ -1211,9 +1215,12 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
                 if available_models:
                     fallback_model = available_models[0]
 
+            # For tools that don't require models, use a default fallback even if no providers are configured
+            # This model is only used for token estimation, not actual API calls
             if fallback_model is None:
-                raise ValueError(
-                    "Conversation continuation failed: no available models detected for context reconstruction."
+                fallback_model = "gemini-2.5-flash"  # Default for token estimation only
+                logger.debug(
+                    f"[CONVERSATION_DEBUG] No providers configured - using default '{fallback_model}' for token estimation only (tool: {context.tool_name})"
                 )
 
             logger.debug(
@@ -1326,6 +1333,7 @@ async def handle_list_prompts() -> list[Prompt]:
 
     # Check if we have any API providers configured
     from providers.registry import ModelProviderRegistry
+
     try:
         has_api_providers = len(ModelProviderRegistry.get_available_models()) > 0
     except Exception as e:
@@ -1340,7 +1348,7 @@ async def handle_list_prompts() -> list[Prompt]:
             continue
 
         # In clink-only mode (no API), only show clink prompt
-        if not has_api_providers and tool_name != 'clink':
+        if not has_api_providers and tool_name != "clink":
             logger.debug(f"Skipping prompt for '{tool_name}' - clink-only mode")
             continue
         if tool_name in PROMPT_TEMPLATES:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+
 import httpx
+
 from utils.env import get_env
+
 from ..shared import ModelCapabilities, ProviderType
 from .base import CAPABILITY_FIELD_NAMES, CapabilityModelRegistry
 
