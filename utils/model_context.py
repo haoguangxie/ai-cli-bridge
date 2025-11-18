@@ -32,6 +32,7 @@ from typing import Any, Optional
 
 from config import DEFAULT_MODEL
 from providers import ModelCapabilities, ModelProviderRegistry
+from providers.shared.provider_type import ProviderType
 
 logger = logging.getLogger(__name__)
 
@@ -103,13 +104,18 @@ class ModelContext:
                 logger.debug(
                     f"No provider available for model '{self.model_name}' - using default capabilities for token estimation"
                 )
-                # Use Gemini 2.5 Flash as default for token estimation
+                # Use generous defaults for token estimation when no provider is available
+                # This allows the model to be used with features like images until a real
+                # provider can reject the request with a proper error message
                 self._capabilities = ModelCapabilities(
+                    provider=ProviderType.CUSTOM,
                     model_name=self.model_name,
-                    context_window=1_048_576,  # 1M tokens
+                    friendly_name=self.model_name,
+                    context_window=1_048_576,  # 1M tokens (Gemini-like default)
                     max_output_tokens=8192,
-                    supports_images=False,
+                    supports_images=True,  # Assume support until provider says otherwise
                     supports_extended_thinking=False,
+                    max_image_size_mb=20.0,  # Reasonable default (Gemini's limit)
                 )
         return self._capabilities
 

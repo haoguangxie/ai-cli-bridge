@@ -171,7 +171,7 @@ class TestImageSupportIntegration:
         """Test that tools validate image size limits using real provider resolution."""
         tool = ChatTool()
 
-        # Create small test images (each 0.5MB, total 1MB)
+        # Create small test images (each 0.5MB, total 1MB) - should pass default limits
         small_images = []
         for _ in range(2):
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
@@ -179,14 +179,25 @@ class TestImageSupportIntegration:
                 temp_file.write(b"\x00" * (512 * 1024))
                 small_images.append(temp_file.name)
 
+        # Create large test image (25MB) - should exceed default limits
+        large_image = None
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
+            # Write 25MB of data (exceeds default 20MB limit)
+            temp_file.write(b"\x00" * (25 * 1024 * 1024))
+            large_image = temp_file.name
+
         try:
-            # Test with an invalid model name that doesn't exist in any provider
-            # Use model_context parameter name (not positional)
+            # Test with small images and a model that uses default capabilities
+            # Small images should pass validation even with default capabilities
             result = tool._validate_image_limits(small_images, model_context=ModelContext("non-existent-model-12345"))
-            # Should return error because model not available or doesn't support images
+            assert result is None  # Should pass for small images
+
+            # Test with large image that exceeds default limit
+            result = tool._validate_image_limits([large_image], model_context=ModelContext("non-existent-model-12345"))
+            # Should return error because image exceeds size limit
             assert result is not None
             assert result["status"] == "error"
-            assert "is not available" in result["content"] or "does not support image processing" in result["content"]
+            assert "size limit exceeded" in result["content"].lower()
 
             # Test that empty/None images always pass regardless of model
             result = tool._validate_image_limits([], model_context=ModelContext("gemini-2.5-pro"))
@@ -200,6 +211,8 @@ class TestImageSupportIntegration:
             for img_path in small_images:
                 if os.path.exists(img_path):
                     os.unlink(img_path)
+            if large_image and os.path.exists(large_image):
+                os.unlink(large_image)
 
     def test_image_validation_model_specific_limits(self):
         """Test that different models have appropriate size limits using real provider resolution."""
@@ -423,22 +436,26 @@ class TestImageSupportIntegration:
         """Test that tools can handle data URL format images."""
         tool = ChatTool()
 
-        # Test with data URL (base64 encoded 1x1 transparent PNG)
-        data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-        images = [data_url]
+        # Test with small data URL (base64 encoded 1x1 transparent PNG) - should pass
+        small_data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        small_images = [small_data_url]
 
-        # Test with a dummy model that doesn't exist in any provider
-        result = tool._validate_image_limits(images, ModelContext("test-dummy-model-name"))
-        # Should return error because model not available or doesn't support images
+        # Small data URL should pass validation with default capabilities
+        result = tool._validate_image_limits(small_images, ModelContext("test-dummy-model-name"))
+        assert result is None  # Should pass for small data URLs
+
+        # Create a large data URL (exceeds default 20MB limit)
+        # Generate 25MB of base64 data
+        large_data = "A" * (25 * 1024 * 1024)  # 25MB of 'A' characters
+        import base64
+
+        large_data_url = f"data:image/png;base64,{base64.b64encode(large_data.encode()).decode()}"
+
+        # Large data URL should fail validation
+        result = tool._validate_image_limits([large_data_url], ModelContext("another-dummy-model"))
         assert result is not None
         assert result["status"] == "error"
-        assert "is not available" in result["content"] or "does not support image processing" in result["content"]
-
-        # Test with another non-existent model to check error handling
-        result = tool._validate_image_limits(images, ModelContext("another-dummy-model"))
-        # Should return error because model not available
-        assert result is not None
-        assert result["status"] == "error"
+        assert "size limit exceeded" in result["content"].lower()
 
     def test_empty_images_handling(self):
         """Test that tools handle empty images lists gracefully."""
