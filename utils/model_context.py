@@ -108,8 +108,8 @@ class ModelContext:
                     model_name=self.model_name,
                     context_window=1_048_576,  # 1M tokens
                     max_output_tokens=8192,
-                    supports_vision=False,
-                    supports_thinking=False,
+                    supports_images=False,
+                    supports_extended_thinking=False,
                 )
         return self._capabilities
 
