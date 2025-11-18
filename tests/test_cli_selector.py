@@ -8,11 +8,17 @@ from clink.cli_selector import CLISelector
 class MockRegistry:
     """Mock registry for testing."""
 
-    def __init__(self, clients):
+    def __init__(self, clients, roles_map=None):
         self._clients = clients
+        # Default roles map: all CLIs support 'default', 'codereviewer', and 'planner'
+        self._roles_map = roles_map or {cli: ["default", "codereviewer", "planner"] for cli in clients}
 
     def list_clients(self):
         return self._clients
+
+    def list_roles(self, cli_name):
+        """List roles supported by a CLI."""
+        return self._roles_map.get(cli_name, ["default"])
 
 
 class TestCLISelector:
@@ -124,10 +130,15 @@ class TestCLISelector:
         selector = CLISelector(registry)
         assert selector._get_default_cli() == "codex"
 
-        # Test gemini avoidance
+        # Test gemini as third choice (now included in preference order)
         registry = MockRegistry(["gemini", "other"])
         selector = CLISelector(registry)
-        assert selector._get_default_cli() == "other"
+        assert selector._get_default_cli() == "gemini"
+
+        # Test fallback to first available for unknown CLI
+        registry = MockRegistry(["unknown"])
+        selector = CLISelector(registry)
+        assert selector._get_default_cli() == "unknown"
 
     def test_mixed_keywords_highest_score_wins(self):
         """Test that highest keyword score determines selection."""

@@ -146,7 +146,10 @@ class BaseCLIAgent:
                 except OSError:  # pragma: no cover - best effort cleanup
                     pass
 
-            if output_file_content and not stdout_text.strip():
+            # Prefer file content when output_to_file is configured
+            # This allows CLIs to emit logs/progress to stdout while writing
+            # the actual structured output to the file
+            if output_file_content:
                 stdout_text = output_file_content
 
         if return_code != 0:

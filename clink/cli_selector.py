@@ -112,47 +112,90 @@ class CLISelector:
         if not self._available_clis:
             raise ValueError("No CLI clients are configured")
 
+        # Filter available CLIs by role support if role is specified
+        available_for_role = self._filter_clis_by_role(role) if role else self._available_clis
+
+        if not available_for_role:
+            role_name = role or "default"
+            raise ValueError(
+                f"No configured CLI supports the role '{role_name}'. "
+                f"Available CLIs: {', '.join(self._available_clis)}"
+            )
+
         # If user explicitly requested a CLI, validate and use it
         if requested_cli:
-            if requested_cli in self._available_clis:
+            requested_lower = requested_cli.lower()
+            if requested_lower in [cli.lower() for cli in available_for_role]:
                 logger.info("Using explicitly requested CLI: %s", requested_cli)
                 return requested_cli
+            if requested_lower in [cli.lower() for cli in self._available_clis]:
+                raise ValueError(
+                    f"CLI '{requested_cli}' does not support the role '{role}'. "
+                    f"CLIs supporting this role: {', '.join(available_for_role)}"
+                )
             logger.warning(
                 "Requested CLI '%s' not available, falling back to auto-selection",
                 requested_cli,
             )
 
-        # If role is specified, use role-based selection
+        # If role is specified, use role-based selection within filtered list
         if role:
-            selected = self._select_by_role(role)
+            selected = self._select_by_role(role, available_clis=available_for_role)
             if selected:
                 logger.info("Selected CLI '%s' based on role '%s'", selected, role)
                 return selected
 
-        # Analyze prompt content for task type
-        selected = self._select_by_prompt_analysis(prompt)
+        # Analyze prompt content for task type within filtered list
+        selected = self._select_by_prompt_analysis(prompt, available_clis=available_for_role)
         logger.info("Selected CLI '%s' based on prompt analysis", selected)
         return selected
 
-    def _select_by_role(self, role: str) -> str | None:
+    def _filter_clis_by_role(self, role: str) -> list[str]:
+        """Filter available CLIs to only those supporting the requested role."""
+        if not role:
+            return self._available_clis
+
+        filtered = []
+        for cli_name in self._available_clis:
+            try:
+                cli_roles = self._registry.list_roles(cli_name)
+                # Normalize role names for comparison
+                normalized_roles = [r.lower() for r in cli_roles]
+                if role.lower() in normalized_roles:
+                    filtered.append(cli_name)
+            except Exception as exc:
+                logger.warning("Failed to check roles for CLI '%s': %s", cli_name, exc)
+                continue
+
+        return filtered
+
+    def _select_by_role(self, role: str, available_clis: list[str] | None = None) -> str | None:
         """Select CLI based on role preference."""
+        clis = available_clis if available_clis is not None else self._available_clis
         role_lower = role.lower()
+
+        # Normalize CLI names for case-insensitive comparison
+        cli_lower_map = {cli.lower(): cli for cli in clis}
 
         # For code review role, prefer codex if available
         if "review" in role_lower or "reviewer" in role_lower:
-            if "codex" in self._available_clis:
-                return "codex"
+            if "codex" in cli_lower_map:
+                return cli_lower_map["codex"]
 
         # For planner role, prefer claude if available
         if "plan" in role_lower or "planner" in role_lower:
-            if "claude" in self._available_clis:
-                return "claude"
+            if "claude" in cli_lower_map:
+                return cli_lower_map["claude"]
 
         return None
 
-    def _select_by_prompt_analysis(self, prompt: str) -> str:
+    def _select_by_prompt_analysis(self, prompt: str, available_clis: list[str] | None = None) -> str:
         """Analyze prompt content and select appropriate CLI."""
+        clis = available_clis if available_clis is not None else self._available_clis
         prompt_lower = prompt.lower()
+
+        # Normalize CLI names for case-insensitive comparison
+        cli_lower_map = {cli.lower(): cli for cli in clis}
 
         # Calculate scores for each task type
         review_score = self._calculate_keyword_score(prompt_lower, self.REVIEW_KEYWORDS)
@@ -169,21 +212,21 @@ class CLISelector:
         # Select based on highest score
         if review_score > implementation_score and review_score > planning_score:
             # Code review task - prefer codex
-            if "codex" in self._available_clis:
-                return "codex"
+            if "codex" in cli_lower_map:
+                return cli_lower_map["codex"]
 
         if implementation_score > review_score and implementation_score > planning_score:
             # Implementation task - prefer claude
-            if "claude" in self._available_clis:
-                return "claude"
+            if "claude" in cli_lower_map:
+                return cli_lower_map["claude"]
 
         if planning_score > review_score and planning_score > implementation_score:
             # Planning task - prefer claude
-            if "claude" in self._available_clis:
-                return "claude"
+            if "claude" in cli_lower_map:
+                return cli_lower_map["claude"]
 
-        # Default fallback: prefer claude > codex > others
-        return self._get_default_cli()
+        # Default fallback: prefer claude > codex > gemini > others
+        return self._get_default_cli(available_clis=clis)
 
     def _calculate_keyword_score(self, text: str, keywords: set[str]) -> int:
         """Calculate how many keywords from the set appear in the text."""
@@ -203,19 +246,19 @@ class CLISelector:
             score += len(matches)
         return score
 
-    def _get_default_cli(self) -> str:
-        """Get default CLI with preference order: claude > codex > first available."""
-        # Preference order
-        preferred_order = ["claude", "codex"]
+    def _get_default_cli(self, available_clis: list[str] | None = None) -> str:
+        """Get default CLI with preference order: claude > codex > gemini > others."""
+        clis = available_clis if available_clis is not None else self._available_clis
+
+        # Normalize CLI names to lowercase for case-insensitive comparison
+        cli_lower_map = {cli.lower(): cli for cli in clis}
+
+        # Preference order (now including gemini)
+        preferred_order = ["claude", "codex", "gemini"]
 
         for preferred in preferred_order:
-            if preferred in self._available_clis:
-                return preferred
+            if preferred in cli_lower_map:
+                return cli_lower_map[preferred]
 
-        # Fallback to first available (excluding gemini if no actual CLI exists)
-        for cli in self._available_clis:
-            if cli != "gemini":  # Skip gemini as it's often just a placeholder
-                return cli
-
-        # Last resort: return first available even if it's gemini
-        return self._available_clis[0]
+        # Fallback to first available CLI
+        return clis[0]

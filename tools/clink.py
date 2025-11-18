@@ -153,8 +153,8 @@ class CLinkTool(SimpleTool):
             "additionalProperties": False,
         }
 
-        if len(self._cli_names) > 1:
-            schema["required"].append("cli_name")
+        # Don't force cli_name to be required - allow auto-selection to work
+        # Users can still explicitly specify cli_name if they want a specific CLI
 
         return schema
 
