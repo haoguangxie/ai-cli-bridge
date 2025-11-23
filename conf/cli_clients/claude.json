@@ -3,7 +3,7 @@
   "command": "claude",
   "additional_args": [
     "--permission-mode",
-    "acceptEdits",
+    "bypassPermissions",
     "--model",
     "sonnet"
   ],
