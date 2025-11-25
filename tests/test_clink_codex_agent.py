@@ -9,14 +9,64 @@ from clink.agents.codex import CodexAgent
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 
 
+class DummyStdin:
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.buffer.extend(data)
+
+    async def drain(self) -> None:  # pragma: no cover - compatibility shim
+        return
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class DummyProcess:
     def __init__(self, *, stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0):
-        self._stdout = stdout
-        self._stderr = stderr
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.stdin = DummyStdin()
+        if stdout:
+            self.stdout.feed_data(stdout)
+        self.stdout.feed_eof()
+        if stderr:
+            self.stderr.feed_data(stderr)
+        self.stderr.feed_eof()
         self.returncode = returncode
+        self._done = asyncio.Event()
+        self._done.set()
 
-    async def communicate(self, _input):
-        return self._stdout, self._stderr
+    async def wait(self):
+        await self._done.wait()
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+        self._done.set()
+        self.stdout.feed_eof()
+        self.stderr.feed_eof()
+
+
+class HangingProcess(DummyProcess):
+    def __init__(self):
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.stdin = DummyStdin()
+        self.returncode: int | None = None
+        self._done = asyncio.Event()
+
+    async def wait(self):
+        await self._done.wait()
+        return self.returncode if self.returncode is not None else -9
+
+    def kill(self):
+        self.returncode = -9
+        self._done.set()
+        self.stdout.feed_eof()
+        self.stderr.feed_eof()
 
 
 @pytest.fixture()
@@ -30,6 +80,7 @@ def codex_agent():
         config_args=["--json", "--dangerously-bypass-approvals-and-sandbox"],
         env={},
         timeout_seconds=30,
+        idle_timeout_seconds=None,
         parser="codex_jsonl",
         roles={"default": role},
         output_to_file=None,
@@ -73,3 +124,15 @@ async def test_codex_agent_propagates_invalid_json(monkeypatch, codex_agent):
 
     with pytest.raises(CLIAgentError):
         await _run_agent_with_process(monkeypatch, agent, role, process)
+
+
+@pytest.mark.asyncio
+async def test_codex_agent_idle_timeout(monkeypatch, codex_agent):
+    agent, role = codex_agent
+    agent.client.idle_timeout_seconds = 1
+    process = HangingProcess()
+
+    with pytest.raises(CLIAgentError) as excinfo:
+        await _run_agent_with_process(monkeypatch, agent, role, process)
+
+    assert "no output" in str(excinfo.value)

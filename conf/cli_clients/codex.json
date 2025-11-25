@@ -7,6 +7,7 @@
   ],
   "env": {},
   "timeout_seconds": 3600,
+  "idle_timeout_seconds": 300,
   "roles": {
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",

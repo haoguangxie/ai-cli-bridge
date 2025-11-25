@@ -10,16 +10,45 @@ from clink.agents.claude import ClaudeAgent
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 
 
+class DummyStdin:
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.buffer.extend(data)
+
+    async def drain(self) -> None:  # pragma: no cover - compatibility shim
+        return
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class DummyProcess:
     def __init__(self, *, stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0):
-        self._stdout = stdout
-        self._stderr = stderr
+        self.stdout = asyncio.StreamReader()
+        self.stderr = asyncio.StreamReader()
+        self.stdin = DummyStdin()
+        if stdout:
+            self.stdout.feed_data(stdout)
+        self.stdout.feed_eof()
+        if stderr:
+            self.stderr.feed_data(stderr)
+        self.stderr.feed_eof()
         self.returncode = returncode
-        self.stdin_data: bytes | None = None
+        self._done = asyncio.Event()
+        self._done.set()
 
-    async def communicate(self, input_data):
-        self.stdin_data = input_data
-        return self._stdout, self._stderr
+    async def wait(self):
+        await self._done.wait()
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+        self._done.set()
+        self.stdout.feed_eof()
+        self.stderr.feed_eof()
 
 
 @pytest.fixture()
@@ -33,6 +62,7 @@ def claude_agent():
         config_args=["--permission-mode", "acceptEdits"],
         env={},
         timeout_seconds=30,
+        idle_timeout_seconds=None,
         parser="claude_json",
         runner="claude",
         roles={"default": role},
@@ -79,7 +109,7 @@ async def test_claude_agent_injects_system_prompt(monkeypatch, claude_agent):
     assert "--append-system-prompt" in result.sanitized_command
     idx = result.sanitized_command.index("--append-system-prompt")
     assert result.sanitized_command[idx + 1] == "System prompt"
-    assert process.stdin_data.decode().startswith("Respond with 42")
+    assert process.stdin.buffer.decode().startswith("Respond with 42")
 
 
 @pytest.mark.asyncio
