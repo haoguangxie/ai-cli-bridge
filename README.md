@@ -1,5 +1,49 @@
 # Zen MCP: Many Workflows. One Context.
 
+> ## ⚠️ Fork Branch: `feature/custom-model-list`
+>
+> 这是一个专注于 **clink (CLI-to-CLI)** 功能的自定义分支，移除了对 API Provider 的依赖。
+>
+> ### 核心特性
+>
+> **1. Clink-Only 模式** - 无需配置任何 AI API 即可启动
+> - 服务器可以在没有 Gemini/OpenAI/OpenRouter 等 API Key 的情况下运行
+> - 仅暴露 `clink` 和 `listmodels` 工具
+> - 专注于 CLI 子代理功能：Claude Code ↔ Codex CLI 互相调用
+>
+> **2. 智能 CLI 选择器**
+> - 根据任务类型自动选择最合适的 CLI
+> - Codex 适合代码审查/分析，Claude 适合实现/规划
+> - 支持 `codereviewer`、`planner`、`default` 等角色
+>
+> **3. 自定义模型列表 API**
+> - 支持从任意 OpenAI 兼容 API 动态获取模型列表
+> - 配置 `OPENROUTER_BASE_URL` 指向自定义服务
+> - 详见 [CUSTOM_MODELS_API.md](CUSTOM_MODELS_API.md)
+>
+> **4. Metadata 精简** - 减少上下文占用
+> - 移除冗余字段：`events`、`raw`、`usage`、`command` 等
+> - 保留关键字段：`cli_name`、`role`、`duration_seconds`、`model_used`
+>
+> **5. 简化配置**
+> - Gemini CLI 默认禁用 (`gemini.json.disabled`)
+> - 仅保留 Claude 和 Codex CLI 配置
+> - Codex 超时调整为 1 小时
+>
+> ### 快速开始
+> ```bash
+> # 无需任何 API Key，直接运行
+> ./run-server.sh
+>
+> # 使用 clink 调用 Codex 进行代码审查
+> clink with codex codereviewer to review auth module
+> ```
+>
+> ### 与上游差异
+> ```bash
+> git diff main..feature/custom-model-list --stat
+> ```
+
 <div align="center">
 
   [Zen in action](https://github.com/user-attachments/assets/0d26061e-5f21-4ab1-b7d0-f883ddc2c3da)
