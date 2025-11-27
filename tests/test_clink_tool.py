@@ -11,13 +11,14 @@ from tools.clink import MAX_RESPONSE_CHARS, CLinkTool
 @pytest.mark.asyncio
 async def test_clink_tool_execute(monkeypatch):
     tool = CLinkTool()
+    default_cli = tool._default_cli_name
 
     async def fake_run(**kwargs):
         return AgentOutput(
-            parsed=ParsedCLIResponse(content="Hello from Gemini", metadata={"model_used": "gemini-2.5-pro"}),
-            sanitized_command=["gemini", "-o", "json"],
+            parsed=ParsedCLIResponse(content="Hello from CLI", metadata={"model_used": "test-model"}),
+            sanitized_command=["cli", "-o", "json"],
             returncode=0,
-            stdout='{"response": "Hello from Gemini"}',
+            stdout='{"response": "Hello from CLI"}',
             stderr="",
             duration_seconds=0.42,
             parser_name="gemini_json",
@@ -35,7 +36,7 @@ async def test_clink_tool_execute(monkeypatch):
 
     arguments = {
         "prompt": "Summarize the project",
-        "cli_name": "gemini",
+        "cli_name": default_cli,
         "role": "default",
         "absolute_file_paths": [],
         "images": [],
@@ -46,19 +47,22 @@ async def test_clink_tool_execute(monkeypatch):
 
     payload = json.loads(results[0].text)
     assert payload["status"] in {"success", "continuation_available"}
-    assert "Hello from Gemini" in payload["content"]
+    assert "Hello from CLI" in payload["content"]
     metadata = payload.get("metadata", {})
-    assert metadata.get("cli_name") == "gemini"
-    assert metadata.get("command") == ["gemini", "-o", "json"]
+    assert metadata.get("cli_name") == default_cli
+    # command is now pruned from metadata to reduce context bloat
+    assert "command" not in metadata
 
 
 def test_registry_lists_roles():
     registry = get_registry()
     clients = registry.list_clients()
-    assert {"codex", "gemini"}.issubset(set(clients))
-    roles = registry.list_roles("gemini")
-    assert "default" in roles
-    assert "default" in registry.list_roles("codex")
+    # At minimum, codex should be configured
+    assert "codex" in clients
+    # All configured CLIs should have a default role
+    for client in clients:
+        roles = registry.list_roles(client)
+        assert "default" in roles
 
 
 @pytest.mark.asyncio
@@ -93,7 +97,8 @@ async def test_clink_tool_defaults_to_first_cli(monkeypatch):
     payload = json.loads(result[0].text)
     metadata = payload.get("metadata", {})
     assert metadata.get("cli_name") == tool._default_cli_name
-    assert metadata.get("events_removed_for_normal") is True
+    # events should be pruned from metadata to reduce context bloat
+    assert "events" not in metadata
 
 
 @pytest.mark.asyncio
@@ -134,7 +139,8 @@ async def test_clink_tool_truncates_large_output(monkeypatch):
     assert payload["content"].strip() == "This is the condensed summary."
     metadata = payload.get("metadata", {})
     assert metadata.get("output_summarized") is True
-    assert metadata.get("events_removed_for_normal") is True
+    # events should be pruned from metadata to reduce context bloat
+    assert "events" not in metadata
     assert metadata.get("output_original_length") == len(long_text)
 
 
@@ -175,5 +181,6 @@ async def test_clink_tool_truncates_without_summary(monkeypatch):
     assert "exceeding the configured clink limit" in payload["content"]
     metadata = payload.get("metadata", {})
     assert metadata.get("output_truncated") is True
-    assert metadata.get("events_removed_for_normal") is True
+    # events should be pruned from metadata to reduce context bloat
+    assert "events" not in metadata
     assert metadata.get("output_original_length") == len(long_text)

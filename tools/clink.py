@@ -422,16 +422,55 @@ class CLinkTool(SimpleTool):
         *,
         reason: str,
     ) -> dict[str, Any]:
+        """Remove verbose metadata fields that bloat context for calling agents.
+
+        Fields removed (high volume, low value for callers):
+        - events / raw_events / raw: Full CLI event streams (can be very large)
+        - raw_output_file: Full file content (already parsed)
+        - usage / model_usage: Token usage stats (verbose)
+        - duration_ms / duration_api_ms: Redundant with duration_seconds
+        - stderr: Usually empty or contains progress info only
+        - command: Full command array (verbose)
+        - session_id / uuid: Internal identifiers
+
+        Fields preserved (important for callers):
+        - permission_denials: Safety signal for blocked operations
+        - is_error: Error indicator
+        """
         cleaned = dict(metadata)
-        events = cleaned.pop("events", None)
-        if events is not None:
-            cleaned[f"events_removed_for_{reason}"] = True
+
+        # Keys to remove entirely (verbose or low value for callers)
+        keys_to_remove = [
+            "events",
+            "raw_events",
+            "raw",
+            "raw_output_file",
+            "usage",
+            "model_usage",
+            "duration_ms",
+            "duration_api_ms",
+            "stderr",
+            "command",
+            "type",
+            "subtype",
+            "session_id",
+            "uuid",
+        ]
+
+        removed_keys = []
+        for key in keys_to_remove:
+            if key in cleaned:
+                cleaned.pop(key)
+                removed_keys.append(key)
+
+        if removed_keys:
             logger.debug(
-                "Clink dropped %s events metadata for %s response (%s)",
+                "Clink pruned metadata for %s (%s): removed keys %s",
                 client.name,
                 reason,
-                type(events).__name__,
+                removed_keys,
             )
+
         return cleaned
 
     def _build_error_metadata(self, client: ResolvedCLIClient, exc: CLIAgentError) -> dict[str, Any]:
