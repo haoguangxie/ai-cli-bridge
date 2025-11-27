@@ -6,8 +6,7 @@
     "--dangerously-bypass-approvals-and-sandbox"
   ],
   "env": {},
-  "timeout_seconds": 7200,
-  "idle_timeout_seconds": 300,
+  "timeout_seconds": 3600,
   "roles": {
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",

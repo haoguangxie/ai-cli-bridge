@@ -120,81 +120,23 @@ class BaseCLIAgent:
         except FileNotFoundError as exc:
             raise CLIAgentError(f"Executable not found for CLI '{self.client.name}': {exc}") from exc
 
-        if process.stdin:
-            try:
-                process.stdin.write(prompt.encode("utf-8"))
-                await process.stdin.drain()
-                process.stdin.close()
-            except Exception as exc:  # pragma: no cover - defensive
-                process.kill()
-                await process.wait()
-                raise CLIAgentError(
-                    f"Failed to send prompt to CLI '{self.client.name}': {exc}",
-                    returncode=None,
-                ) from exc
-
-        stdout_chunks: list[bytes] = []
-        stderr_chunks: list[bytes] = []
-        last_activity = time.monotonic()
-        idle_timeout = self.client.idle_timeout_seconds
-
-        async def _capture_stream(stream: asyncio.StreamReader | None, buffer: list[bytes]) -> None:
-            nonlocal last_activity
-            if stream is None:
-                return
-            while True:
-                chunk = await stream.read(4096)
-                if not chunk:
-                    break
-                buffer.append(chunk)
-                last_activity = time.monotonic()
-
-        capture_tasks: list[asyncio.Task[None]] = []
-        capture_tasks.append(asyncio.create_task(_capture_stream(process.stdout, stdout_chunks)))
-        capture_tasks.append(asyncio.create_task(_capture_stream(process.stderr, stderr_chunks)))
-
-        wait_task = asyncio.create_task(process.wait())
-
-        async def _wait_for_completion() -> None:
-            overall_timeout = self.client.timeout_seconds
-            if overall_timeout is None and idle_timeout is None:
-                await wait_task
-                return
-
-            check_interval = 1.0
-            while True:
-                try:
-                    await asyncio.wait_for(asyncio.shield(wait_task), timeout=check_interval)
-                    return
-                except asyncio.TimeoutError:
-                    now = time.monotonic()
-                    timed_out = False
-                    timeout_message = ""
-                    if overall_timeout and now - start_time > overall_timeout:
-                        timed_out = True
-                        timeout_message = (
-                            f"CLI '{self.client.name}' timed out after {overall_timeout} seconds"
-                        )
-                    elif idle_timeout and now - last_activity > idle_timeout:
-                        timed_out = True
-                        timeout_message = (
-                            f"CLI '{self.client.name}' produced no output for {idle_timeout} seconds and was terminated"
-                        )
-
-                    if timed_out:
-                        process.kill()
-                        await wait_task
-                        raise CLIAgentError(timeout_message, returncode=None)
-
         try:
-            await _wait_for_completion()
-        finally:
-            await asyncio.gather(*capture_tasks, return_exceptions=True)
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(prompt.encode("utf-8")),
+                timeout=self.client.timeout_seconds,
+            )
+        except asyncio.TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise CLIAgentError(
+                f"CLI '{self.client.name}' timed out after {self.client.timeout_seconds} seconds",
+                returncode=None,
+            ) from exc
 
         duration = time.monotonic() - start_time
-        return_code = wait_task.result()
-        stdout_text = b"".join(stdout_chunks).decode("utf-8", errors="replace")
-        stderr_text = b"".join(stderr_chunks).decode("utf-8", errors="replace")
+        return_code = process.returncode
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
 
         if output_file_path and output_file_path.exists():
             output_file_content = output_file_path.read_text(encoding="utf-8", errors="replace")

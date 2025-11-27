@@ -142,9 +142,6 @@ class ClinkRegistry:
         timeout_seconds = raw.timeout_seconds or (
             internal_defaults.timeout_seconds if internal_defaults else DEFAULT_TIMEOUT_SECONDS
         )
-        idle_timeout_seconds = raw.idle_timeout_seconds
-        if idle_timeout_seconds is not None:
-            idle_timeout_seconds = int(idle_timeout_seconds)
 
         parser_name = internal_defaults.parser
         if not parser_name:
@@ -167,7 +164,6 @@ class ClinkRegistry:
             config_args=config_args,
             env=env,
             timeout_seconds=int(timeout_seconds),
-            idle_timeout_seconds=idle_timeout_seconds,
             parser=parser_name,
             runner=runner_name,
             roles=roles,
