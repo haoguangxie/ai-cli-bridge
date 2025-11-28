@@ -5,7 +5,7 @@
     "--permission-mode",
     "bypassPermissions",
     "--model",
-    "opus"
+    "sonnet"
   ],
   "env": {},
   "roles": {
