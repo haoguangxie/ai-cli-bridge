@@ -5,9 +5,10 @@
     "--permission-mode",
     "bypassPermissions",
     "--model",
-    "sonnet"
+    "opus"
   ],
   "env": {},
+  "timeout_seconds": 10800,
   "roles": {
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",

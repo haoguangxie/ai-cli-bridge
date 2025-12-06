@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_TIMEOUT_SECONDS = 1800
+DEFAULT_TIMEOUT_SECONDS = 10800
 DEFAULT_STREAM_LIMIT = 10 * 1024 * 1024  # 10MB per stream
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
