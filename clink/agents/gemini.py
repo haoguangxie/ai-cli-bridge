@@ -7,10 +7,14 @@ import os
 from pathlib import Path
 from typing import Any
 
+import logging
+
 from clink.models import ResolvedCLIClient
 from clink.parsers.base import ParsedCLIResponse
 
 from .base import AgentOutput, BaseCLIAgent
+
+logger = logging.getLogger("clink.agents.gemini")
 
 # Gemini CLI config path
 GEMINI_ENV_PATH = Path.home() / ".gemini" / ".env"
@@ -107,6 +111,14 @@ class GeminiAgent(BaseCLIAgent):
         content_lines = [header.rstrip(".") + "."]
         content_lines.extend(lines)
         message = "\n".join(content_lines).strip()
+
+        # Log the full error details for debugging
+        logger.warning(
+            "Gemini CLI tool failure recovered: code=%s, type=%s, message=%s",
+            code,
+            err_type,
+            detail_message[:500] if detail_message else "(none)",
+        )
 
         metadata = {
             "cli_error_recovered": True,

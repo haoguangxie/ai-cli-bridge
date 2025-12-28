@@ -29,7 +29,7 @@ COMMON_FIELD_DESCRIPTIONS = {
         "files, and findings so the agent can resume seamlessly."
     ),
     "images": "Optional absolute image paths or base64 blobs for visual context.",
-    "absolute_file_paths": "Full paths to relevant code",
+    "absolute_file_paths": "FULL absolute paths to relevant code files (must start with '/' - DO NOT use relative paths)",
 }
 
 # Workflow-specific field descriptions
