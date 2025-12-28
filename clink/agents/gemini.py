@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 from clink.models import ResolvedCLIClient
@@ -10,12 +12,52 @@ from clink.parsers.base import ParsedCLIResponse
 
 from .base import AgentOutput, BaseCLIAgent
 
+# Gemini CLI config path
+GEMINI_ENV_PATH = Path.home() / ".gemini" / ".env"
+
 
 class GeminiAgent(BaseCLIAgent):
     """Gemini-specific behaviour."""
 
     def __init__(self, client: ResolvedCLIClient):
         super().__init__(client)
+
+    def _build_environment(self) -> dict[str, str]:
+        """Build environment for Gemini CLI, loading from ~/.gemini/.env if needed."""
+        env = super()._build_environment()
+
+        # Load Gemini config from ~/.gemini/.env if the file exists
+        # This ensures CC Switch configurations are respected
+        if GEMINI_ENV_PATH.exists():
+            gemini_env = self._load_gemini_env()
+            for key, value in gemini_env.items():
+                # Only set if not already present or if we cleared it
+                if key not in env or env.get(key) == "":
+                    env[key] = value
+
+        return env
+
+    def _load_gemini_env(self) -> dict[str, str]:
+        """Load environment variables from ~/.gemini/.env file."""
+        result: dict[str, str] = {}
+        try:
+            content = GEMINI_ENV_PATH.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    value = value.strip()
+                    # Remove quotes if present
+                    if value and value[0] in ('"', "'") and value[-1] == value[0]:
+                        value = value[1:-1]
+                    if key:
+                        result[key] = value
+        except Exception:
+            pass  # Silently ignore errors reading the file
+        return result
 
     def _recover_from_error(
         self,

@@ -4,7 +4,11 @@
   "additional_args": [
     "--yolo"
   ],
-  "env": {},
+  "env": {
+    "GEMINI_API_KEY": "",
+    "GEMINI_BASE_URL": "",
+    "GOOGLE_GEMINI_BASE_URL": ""
+  },
   "roles": {
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",

@@ -203,7 +203,13 @@ class BaseCLIAgent:
 
     def _build_environment(self) -> dict[str, str]:
         env = os.environ.copy()
-        env.update(self.client.env)
+        for key, value in self.client.env.items():
+            if value == "" or value is None:
+                # Empty string or None means "remove this variable"
+                # so the CLI will use its own config file (e.g., ~/.gemini/.env)
+                env.pop(key, None)
+            else:
+                env[key] = value
         return env
 
     # ------------------------------------------------------------------
