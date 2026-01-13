@@ -1,7 +1,7 @@
 [project]
-name = "pal-mcp-server"
+name = "ai-cli-bridge"
 version = "9.8.2"
-description = "AI-powered MCP server with multiple model providers"
+description = "AI CLI Bridge - MCP server for bridging AI CLI tools"
 requires-python = ">=3.9"
 dependencies = [
     "mcp>=1.0.0",
@@ -36,7 +36,7 @@ py-modules = ["server", "config"]
 ]
 
 [project.scripts]
-pal-mcp-server = "server:run"
+ai-cli-bridge = "server:run"
 
 [tool.black]
 line-length = 120

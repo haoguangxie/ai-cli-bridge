@@ -1,8 +1,8 @@
 """
-PAL MCP Server - Main server implementation
+AI CLI Bridge - Main server implementation
 
 This module implements the core MCP (Model Context Protocol) server that provides
-AI-powered tools for code analysis, review, and assistance using multiple AI models.
+a bridge to external AI CLI tools for code analysis, review, and assistance.
 
 The server follows the MCP specification to expose various AI tools as callable functions
 that can be used by MCP clients (like Claude). Each tool provides specialized functionality
@@ -138,7 +138,7 @@ logger = logging.getLogger(__name__)
 
 # Create the MCP server instance with a unique name identifier
 # This name is used by MCP clients to identify and connect to this specific server
-server: Server = Server("pal-server")
+server: Server = Server("ai-cli-bridge")
 
 
 # Constants for tool filtering

@@ -1,7 +1,7 @@
 """
-Configuration and constants for PAL MCP Server (clink-only mode)
+Configuration and constants for AI CLI Bridge (clink-only mode)
 
-This module centralizes all configuration settings for the PAL MCP Server.
+This module centralizes all configuration settings for the AI CLI Bridge.
 In clink-only mode, most AI provider and model configurations are not needed.
 
 Configuration values can be overridden by environment variables where appropriate.

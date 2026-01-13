@@ -1,1 +1,1 @@
-"""Configuration data for PAL MCP Server."""
+"""Configuration data for AI CLI Bridge."""

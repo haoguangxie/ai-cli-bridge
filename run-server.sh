@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ============================================================================
-# PAL MCP Server Setup Script
+# AI CLI Bridge Setup Script
 #
 # A platform-agnostic setup script that works on macOS, Linux, and WSL.
 # Handles environment setup, dependency installation, and configuration.

@@ -1,10 +1,10 @@
-# zen-mcp-server (Clink-Only Mode)
+# ai-cli-bridge (Clink-Only Mode)
 
 > **Notice:** This is a minimal clink-only fork. For the full PAL MCP experience with all workflow tools, see the [main repository](https://github.com/BeehiveInnovations/pal-mcp-server).
 
 ## What is This?
 
-This is a streamlined version of PAL MCP Server that provides **only the clink tool** - a bridge that forwards MCP requests to external AI CLI agents.
+AI CLI Bridge - A streamlined MCP server that provides **only the clink tool** - a bridge that forwards MCP requests to external AI CLI agents.
 
 ### Available Tools
 
@@ -24,8 +24,8 @@ This is a streamlined version of PAL MCP Server that provides **only the clink t
 
 ```bash
 # Clone this repository
-git clone https://github.com/your-fork/zen-mcp-server.git
-cd zen-mcp-server
+git clone https://github.com/your-fork/ai-cli-bridge.git
+cd ai-cli-bridge
 
 # Install dependencies
 pip install -r requirements.txt
@@ -51,9 +51,9 @@ Add to your Claude Desktop configuration:
 ```json
 {
   "mcpServers": {
-    "zen-mcp": {
+    "ai-cli-bridge": {
       "command": "python",
-      "args": ["/path/to/zen-mcp-server/server.py"]
+      "args": ["/path/to/ai-cli-bridge/server.py"]
     }
   }
 }
@@ -64,7 +64,7 @@ Add to your Claude Desktop configuration:
 Clink acts as a bridge between MCP protocol and external CLI agents:
 
 ```
-Claude Desktop → MCP Protocol → zen-mcp-server (clink) → External CLI → AI Model
+Claude Desktop → MCP Protocol → ai-cli-bridge (clink) → External CLI → AI Model
                                                                 ↓
                                                            Response
 ```
@@ -101,7 +101,7 @@ Each configuration specifies:
 ## Project Structure
 
 ```
-zen-mcp-server/
+ai-cli-bridge/
 ├── server.py              # Main MCP server (clink-only)
 ├── config.py              # Minimal configuration
 ├── tools/
