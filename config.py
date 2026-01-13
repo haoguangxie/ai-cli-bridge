@@ -101,6 +101,12 @@ TEMPERATURE_BALANCED = 0.7
 # Leave empty for default language (English)
 LOCALE = get_env("LOCALE", "") or ""
 
+# Model Selection Configuration
+# DEFAULT_MODEL can be overridden via environment variable; defaults to auto mode.
+DEFAULT_MODEL = (get_env("DEFAULT_MODEL", "auto") or "auto").strip()
+# Auto mode is enabled when DEFAULT_MODEL is set to "auto".
+IS_AUTO_MODE = DEFAULT_MODEL.lower() == "auto"
+
 # Threading configuration
 # Simple in-memory conversation threading for stateless MCP environment
 # Conversations persist only during the Claude session

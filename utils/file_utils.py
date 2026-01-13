@@ -44,9 +44,170 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .file_types import BINARY_EXTENSIONS, CODE_EXTENSIONS, IMAGE_EXTENSIONS, TEXT_EXTENSIONS
-from .security_config import EXCLUDED_DIRS, is_dangerous_path
 from .token_utils import DEFAULT_CONTEXT_WINDOW, estimate_tokens
+
+# Simplified file type and security configuration (inlined for clink usage).
+CODE_EXTENSIONS = {
+    ".py",
+    ".pyi",
+    ".js",
+    ".ts",
+    ".jsx",
+    ".tsx",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".md",
+    ".markdown",
+    ".txt",
+    ".rst",
+    ".html",
+    ".htm",
+    ".css",
+    ".scss",
+    ".sass",
+    ".less",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".ps1",
+    ".bat",
+    ".cmd",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".kts",
+    ".c",
+    ".h",
+    ".cpp",
+    ".hpp",
+    ".cs",
+    ".php",
+    ".rb",
+    ".swift",
+    ".m",
+    ".mm",
+    ".sql",
+    ".graphql",
+    ".proto",
+    ".xml",
+}
+
+TEXT_EXTENSIONS = CODE_EXTENSIONS | {".log", ".csv", ".tsv"}
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp", ".ico"}
+
+BINARY_EXTENSIONS = {
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".xz",
+    ".7z",
+    ".rar",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".bin",
+    ".dat",
+    ".class",
+    ".jar",
+}
+
+EXCLUDED_DIRS = {
+    "__pycache__",
+    ".git",
+    ".hg",
+    ".svn",
+    ".idea",
+    ".vscode",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "venv",
+    ".pal_venv",
+    "node_modules",
+    "dist",
+    "build",
+    "out",
+    "target",
+    "coverage",
+}
+
+
+def is_dangerous_path(path: Path) -> bool:
+    """
+    Basic guard against scanning system directories outside user projects.
+    """
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return True
+
+    if resolved == Path(resolved.anchor):
+        return True
+
+    if os.name == "nt":
+        windows_prefixes = []
+        for env_var in ("SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
+            value = os.environ.get(env_var)
+            if value:
+                windows_prefixes.append(Path(value))
+        for prefix in windows_prefixes:
+            try:
+                resolved.relative_to(prefix.resolve())
+                return True
+            except ValueError:
+                continue
+        return False
+
+    posix_prefixes = (
+        Path("/bin"),
+        Path("/sbin"),
+        Path("/usr/bin"),
+        Path("/usr/sbin"),
+        Path("/usr/lib"),
+        Path("/usr/libexec"),
+        Path("/usr/share"),
+        Path("/etc"),
+        Path("/var"),
+        Path("/private"),
+        Path("/System"),
+        Path("/Library"),
+        Path("/proc"),
+        Path("/dev"),
+        Path("/sys"),
+    )
+    for prefix in posix_prefixes:
+        try:
+            resolved.relative_to(prefix)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def get_token_estimation_ratio(file_path: str) -> float:
+    """
+    Return a conservative bytes-per-token ratio for rough size estimation.
+    """
+    extension = Path(file_path).suffix.lower()
+    if extension in CODE_EXTENSIONS:
+        return 3.6
+    if extension in TEXT_EXTENSIONS:
+        return 4.0
+    if extension in IMAGE_EXTENSIONS or extension in BINARY_EXTENSIONS:
+        return 1.0
+    return 4.0
 
 
 def _is_builtin_custom_models_config(path_str: str) -> bool:
@@ -641,9 +802,6 @@ def estimate_file_tokens(file_path: str) -> int:
 
         file_size = os.path.getsize(file_path)
 
-        # Get the appropriate ratio for this file type
-        from .file_types import get_token_estimation_ratio
-
         ratio = get_token_estimation_ratio(file_path)
 
         return int(file_size / ratio)
@@ -773,9 +931,23 @@ def is_text_file(file_path: str) -> bool:
     Returns:
         True if file appears to be text, False otherwise
     """
-    from .file_types import is_text_file as check_text_type
+    path = Path(file_path)
+    extension = path.suffix.lower()
 
-    return check_text_type(file_path)
+    if extension in TEXT_EXTENSIONS or extension in CODE_EXTENSIONS:
+        return True
+    if extension in IMAGE_EXTENSIONS or extension in BINARY_EXTENSIONS:
+        return False
+
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(1024)
+        if b"\x00" in chunk:
+            return False
+        chunk.decode("utf-8")
+        return True
+    except (OSError, UnicodeDecodeError):
+        return False
 
 
 def read_file_safely(file_path: str, max_size: int = 10 * 1024 * 1024) -> Optional[str]:

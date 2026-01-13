@@ -106,6 +106,8 @@ context preservation and natural conversation understanding.
 
 import logging
 import os
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -146,6 +148,35 @@ except ValueError:
     CONVERSATION_TIMEOUT_HOURS = 3
 
 CONVERSATION_TIMEOUT_SECONDS = CONVERSATION_TIMEOUT_HOURS * 3600
+
+
+class InMemoryStorage:
+    """Thread-safe in-memory storage with TTL support."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._store: dict[str, tuple[float, str]] = {}
+
+    def setex(self, key: str, ttl_seconds: int, value: str) -> None:
+        expires_at = time.time() + max(0, ttl_seconds)
+        with self._lock:
+            self._store[key] = (expires_at, value)
+
+    def get(self, key: str) -> Optional[str]:
+        now = time.time()
+        with self._lock:
+            entry = self._store.get(key)
+            if not entry:
+                return None
+            expires_at, value = entry
+            if expires_at <= now:
+                self._store.pop(key, None)
+                return None
+            return value
+
+
+_STORAGE_INSTANCE: Optional[InMemoryStorage] = None
+_STORAGE_LOCK = threading.Lock()
 
 
 class ConversationTurn(BaseModel):
@@ -212,9 +243,14 @@ def get_storage():
     Returns:
         InMemoryStorage: Thread-safe in-memory storage backend
     """
-    from .storage_backend import get_storage_backend
+    global _STORAGE_INSTANCE
 
-    return get_storage_backend()
+    if _STORAGE_INSTANCE is None:
+        with _STORAGE_LOCK:
+            if _STORAGE_INSTANCE is None:
+                _STORAGE_INSTANCE = InMemoryStorage()
+
+    return _STORAGE_INSTANCE
 
 
 def create_thread(tool_name: str, initial_request: dict[str, Any], parent_thread_id: Optional[str] = None) -> str:
@@ -773,16 +809,13 @@ def build_conversation_history(context: ThreadContext, model_context=None, read_
     # Get model-specific token allocation early (needed for both files and turns)
     if model_context is None:
         from config import DEFAULT_MODEL, IS_AUTO_MODE
-        from utils.model_context import ModelContext
+        from utils.model_context import ModelContext, get_preferred_fallback_model
 
         # In auto mode, use an intelligent fallback model for token calculations
         # since "auto" is not a real model with a provider
         model_name = DEFAULT_MODEL
         if IS_AUTO_MODE and model_name.lower() == "auto":
-            # Use intelligent fallback based on available API keys
-            from providers.registry import ModelProviderRegistry
-
-            model_name = ModelProviderRegistry.get_preferred_fallback_model()
+            model_name = get_preferred_fallback_model() or model_name
 
         model_context = ModelContext(model_name)
 

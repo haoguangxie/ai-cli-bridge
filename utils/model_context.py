@@ -1,9 +1,9 @@
 """
 Model context management for dynamic token allocation.
 
-This module provides a clean abstraction for model-specific token management,
-ensuring that token limits are properly calculated based on the current model
-being used, not global constants.
+This module provides a provider-free abstraction for model-specific token
+management in clink-only mode. It uses local model metadata (from conf/*.json)
+when available and falls back to a conservative default context window.
 
 CONVERSATION MEMORY INTEGRATION:
 This module works closely with the conversation memory system to provide
@@ -16,8 +16,8 @@ optimal token allocation for multi-turn conversations:
 
 2. MODEL-SPECIFIC ALLOCATION:
    - Dynamic allocation based on model capabilities (context window size)
-   - Conservative allocation for smaller models (O3: 200K context)
-   - Generous allocation for larger models (Gemini: 1M+ context)
+   - Conservative allocation for smaller models
+   - Generous allocation for larger models
    - Adapts token distribution ratios based on model capacity
 
 3. CROSS-TOOL CONSISTENCY:
@@ -26,14 +26,39 @@ optimal token allocation for multi-turn conversations:
    - Supports conversation reconstruction with proper budget management
 """
 
+import json
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from config import DEFAULT_MODEL
-from providers import ModelCapabilities, ModelProviderRegistry
+from utils.token_utils import DEFAULT_CONTEXT_WINDOW, estimate_tokens as estimate_tokens_util
 
 logger = logging.getLogger(__name__)
+
+_CONF_MODEL_FILES = (
+    "openai_models.json",
+    "gemini_models.json",
+    "openrouter_models.json",
+    "xai_models.json",
+    "azure_models.json",
+    "dial_models.json",
+    "custom_models.json",
+)
+
+_MODEL_METADATA_CACHE: Optional[dict[str, dict[str, Any]]] = None
+
+
+@dataclass
+class ModelCapabilities:
+    """Minimal model capability set for clink-only mode."""
+
+    context_window: int
+    supports_extended_thinking: bool = False
+    supports_images: bool = False
+    supports_temperature: bool = True
+    max_image_size_mb: Optional[float] = None
 
 
 @dataclass
@@ -52,45 +77,139 @@ class TokenAllocation:
         return self.content_tokens - self.file_tokens - self.history_tokens
 
 
+def _load_model_metadata() -> dict[str, dict[str, Any]]:
+    """Load model metadata from conf/*.json and cache the result."""
+    global _MODEL_METADATA_CACHE
+
+    if _MODEL_METADATA_CACHE is not None:
+        return _MODEL_METADATA_CACHE
+
+    metadata: dict[str, dict[str, Any]] = {}
+    conf_dir = Path(__file__).resolve().parent.parent / "conf"
+
+    for filename in _CONF_MODEL_FILES:
+        path = conf_dir / filename
+        if not path.exists():
+            continue
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:
+            logger.debug("Failed to load model metadata from %s: %s", path, exc)
+            continue
+
+        for entry in data.get("models", []):
+            if not isinstance(entry, dict):
+                continue
+
+            model_name = str(entry.get("model_name") or "").strip()
+            if not model_name:
+                continue
+
+            key = model_name.lower()
+            metadata.setdefault(key, entry)
+
+            aliases = entry.get("aliases") or []
+            if isinstance(aliases, list):
+                for alias in aliases:
+                    alias_key = str(alias or "").strip().lower()
+                    if alias_key:
+                        metadata.setdefault(alias_key, entry)
+
+    _MODEL_METADATA_CACHE = metadata
+    return metadata
+
+
+def get_available_model_names() -> list[str]:
+    """Return available model names from local metadata (deduplicated)."""
+    metadata = _load_model_metadata()
+    model_names: set[str] = set()
+    for entry in metadata.values():
+        if not isinstance(entry, dict):
+            continue
+        model_name = str(entry.get("model_name") or "").strip()
+        if model_name:
+            model_names.add(model_name)
+    return sorted(model_names)
+
+
+def get_preferred_fallback_model(model_category: Any = None) -> Optional[str]:
+    """
+    Return a preferred fallback model for clink-only mode.
+
+    model_category is accepted for API parity but is not used in clink-only mode.
+    """
+    _ = model_category
+    if DEFAULT_MODEL and DEFAULT_MODEL.lower() != "auto":
+        return DEFAULT_MODEL
+    available_models = get_available_model_names()
+    if available_models:
+        return available_models[0]
+    return None
+
+
+def _resolve_capabilities(model_name: str) -> ModelCapabilities:
+    lookup_name = (model_name or "").strip().lower()
+    metadata = _load_model_metadata().get(lookup_name) if lookup_name else None
+
+    context_window = DEFAULT_CONTEXT_WINDOW
+    supports_extended_thinking = False
+    supports_images = False
+    supports_temperature = True
+    max_image_size_mb = None
+
+    if isinstance(metadata, dict):
+        try:
+            context_window = int(metadata.get("context_window") or context_window)
+        except (TypeError, ValueError):
+            context_window = DEFAULT_CONTEXT_WINDOW
+        supports_extended_thinking = bool(metadata.get("supports_extended_thinking", False))
+        supports_images = bool(metadata.get("supports_images", False))
+        supports_temperature = bool(metadata.get("supports_temperature", True))
+        max_image_size_mb = metadata.get("max_image_size_mb")
+        if max_image_size_mb is not None:
+            try:
+                max_image_size_mb = float(max_image_size_mb)
+            except (TypeError, ValueError):
+                max_image_size_mb = None
+
+    if context_window <= 0:
+        context_window = DEFAULT_CONTEXT_WINDOW
+
+    return ModelCapabilities(
+        context_window=context_window,
+        supports_extended_thinking=supports_extended_thinking,
+        supports_images=supports_images,
+        supports_temperature=supports_temperature,
+        max_image_size_mb=max_image_size_mb,
+    )
+
+
 class ModelContext:
     """
     Encapsulates model-specific information and token calculations.
 
-    This class provides a single source of truth for all model-related
-    token calculations, ensuring consistency across the system.
+    This class provides a single source of truth for token calculations,
+    using local metadata without relying on provider registries.
     """
 
     def __init__(self, model_name: str, model_option: Optional[str] = None):
         self.model_name = model_name
         self.model_option = model_option  # Store optional model option (e.g., "for", "against", etc.)
-        self._provider = None
-        self._capabilities = None
+        self._capabilities: Optional[ModelCapabilities] = None
         self._token_allocation = None
 
     @property
     def provider(self):
-        """Get the model provider lazily."""
-        if self._provider is None:
-            self._provider = ModelProviderRegistry.get_provider_for_model(self.model_name)
-            if not self._provider:
-                available_models = ModelProviderRegistry.get_available_model_names()
-                if available_models:
-                    available_text = ", ".join(available_models)
-                else:
-                    available_text = (
-                        "No models detected. Configure provider credentials or set DEFAULT_MODEL to a valid option."
-                    )
-
-                raise ValueError(
-                    f"Model '{self.model_name}' is not available with current API keys. Available models: {available_text}."
-                )
-        return self._provider
+        """Providers are not available in clink-only mode."""
+        raise RuntimeError("Provider system is not available in clink-only mode.")
 
     @property
     def capabilities(self) -> ModelCapabilities:
-        """Get model capabilities lazily."""
+        """Get model capabilities lazily from local metadata."""
         if self._capabilities is None:
-            self._capabilities = self.provider.get_capabilities(self.model_name)
+            self._capabilities = _resolve_capabilities(self.model_name)
         return self._capabilities
 
     def calculate_token_allocation(self, reserved_for_response: Optional[int] = None) -> TokenAllocation:
@@ -125,13 +244,13 @@ class ModelContext:
 
         # Dynamic allocation based on model capacity
         if total_tokens < 300_000:
-            # Smaller context models (O3): Conservative allocation
+            # Smaller context models: Conservative allocation
             content_ratio = 0.6  # 60% for content
             response_ratio = 0.4  # 40% for response
             file_ratio = 0.3  # 30% of content for files
             history_ratio = 0.5  # 50% of content for history
         else:
-            # Larger context models (Gemini): More generous allocation
+            # Larger context models: More generous allocation
             content_ratio = 0.8  # 80% for content
             response_ratio = 0.2  # 20% for response
             file_ratio = 0.4  # 40% of content for files
@@ -153,25 +272,20 @@ class ModelContext:
             history_tokens=history_tokens,
         )
 
-        logger.debug(f"Token allocation for {self.model_name}:")
-        logger.debug(f"  Total: {allocation.total_tokens:,}")
-        logger.debug(f"  Content: {allocation.content_tokens:,} ({content_ratio:.0%})")
-        logger.debug(f"  Response: {allocation.response_tokens:,} ({response_ratio:.0%})")
-        logger.debug(f"  Files: {allocation.file_tokens:,} ({file_ratio:.0%} of content)")
-        logger.debug(f"  History: {allocation.history_tokens:,} ({history_ratio:.0%} of content)")
+        logger.debug("Token allocation for %s:", self.model_name)
+        logger.debug("  Total: %s", f"{allocation.total_tokens:,}")
+        logger.debug("  Content: %s (%s)", f"{allocation.content_tokens:,}", f"{content_ratio:.0%}")
+        logger.debug("  Response: %s (%s)", f"{allocation.response_tokens:,}", f"{response_ratio:.0%}")
+        logger.debug("  Files: %s (%s of content)", f"{allocation.file_tokens:,}", f"{file_ratio:.0%}")
+        logger.debug("  History: %s (%s of content)", f"{allocation.history_tokens:,}", f"{history_ratio:.0%}")
 
         return allocation
 
     def estimate_tokens(self, text: str) -> int:
         """
-        Estimate token count for text using model-specific tokenizer.
-
-        For now, uses simple estimation. Can be enhanced with model-specific
-        tokenizers (tiktoken for OpenAI, etc.) in the future.
+        Estimate token count for text using model-agnostic heuristic.
         """
-        # TODO: Integrate model-specific tokenizers
-        # For now, use conservative estimation
-        return len(text) // 3  # Conservative estimate
+        return estimate_tokens_util(text)
 
     @classmethod
     def from_arguments(cls, arguments: dict[str, Any]) -> "ModelContext":

@@ -243,7 +243,7 @@ class VersionTool(BaseTool):
         output_lines.append("")
         output_lines.append("## Agent Reporting Guidance")
         output_lines.append(
-            "Agents MUST report: version, model-selection status, configured providers, and available-model count."
+            "Agents MUST report: version, model-selection status, configured CLI clients, and available-model count."
         )
         output_lines.append("Repeat the quick-summary bullets verbatim in your reply.")
         output_lines.append("Reference `listmodels` when users ask about model availability or capabilities.")
@@ -305,42 +305,36 @@ class VersionTool(BaseTool):
         # Configuration information
         output_lines.append("## Configuration")
 
-        # Check for configured providers
+        # Check for configured CLI clients (clink-only mode)
         try:
-            from providers.registry import ModelProviderRegistry
-            from providers.shared import ProviderType
+            from clink import get_registry
+            from clink.registry import RegistryLoadError
 
-            provider_status = []
-
-            # Check each provider type
-            provider_types = [
-                ProviderType.GOOGLE,
-                ProviderType.OPENAI,
-                ProviderType.XAI,
-                ProviderType.DIAL,
-                ProviderType.OPENROUTER,
-                ProviderType.CUSTOM,
-            ]
-            provider_names = ["Google Gemini", "OpenAI", "X.AI", "DIAL", "OpenRouter", "Custom/Local"]
-
-            for provider_type, provider_name in zip(provider_types, provider_names):
-                provider = ModelProviderRegistry.get_provider(provider_type)
-                status = "✅ Configured" if provider is not None else "❌ Not configured"
-                provider_status.append(f"- **{provider_name}**: {status}")
-
-            output_lines.append("**Providers**:")
-            output_lines.extend(provider_status)
-
-            # Get total available models
             try:
-                available_models = ModelProviderRegistry.get_available_models(respect_restrictions=True)
-                output_lines.append(f"\n\n**Available Models**: {len(available_models)}")
-            except Exception:
-                output_lines.append("\n\n**Available Models**: Unknown")
+                registry = get_registry()
+                cli_names = registry.list_clients()
+            except RegistryLoadError:
+                cli_names = []
+
+            if cli_names:
+                output_lines.append("**Configured CLI Clients**:")
+                for cli_name in cli_names:
+                    output_lines.append(f"- **{cli_name}**: ✅ Configured")
+            else:
+                output_lines.append("**Configured CLI Clients**: None configured")
 
         except Exception as e:
-            logger.warning(f"Error checking provider configuration: {e}")
-            output_lines.append("\n\n**Providers**: Error checking configuration")
+            logger.warning(f"Error checking CLI configuration: {e}")
+            output_lines.append("**Configured CLI Clients**: Error checking configuration")
+
+        # Get total available models from local metadata
+        try:
+            from utils.model_context import get_available_model_names
+
+            available_models = get_available_model_names()
+            output_lines.append(f"\n\n**Available Models (local metadata)**: {len(available_models)}")
+        except Exception:
+            output_lines.append("\n\n**Available Models (local metadata)**: Unknown")
 
         output_lines.append("")
 
