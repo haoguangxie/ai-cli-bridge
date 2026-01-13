@@ -1,0 +1,60 @@
+[
+  {
+    "name": "删除不需要的工具文件",
+    "status": "done",
+    "level": "L1",
+    "acceptance": [
+      "tools/ 目录下只剩 clink.py, version.py, __init__.py",
+      "tools/shared/ 和 tools/simple/ 保留",
+      "tools/workflow/ 目录已删除"
+    ],
+    "blockedBy": [],
+    "blocks": ["修改 server.py"]
+  },
+  {
+    "name": "删除 providers 目录",
+    "status": "done",
+    "level": "L1",
+    "acceptance": [
+      "providers/ 目录已删除"
+    ],
+    "blockedBy": [],
+    "blocks": ["修改 server.py"]
+  },
+  {
+    "name": "清理 systemprompts",
+    "status": "done",
+    "level": "L1",
+    "acceptance": [
+      "只保留 clink 相关的提示词文件",
+      "其他工具的提示词已删除"
+    ],
+    "blockedBy": [],
+    "blocks": ["修改 server.py"]
+  },
+  {
+    "name": "修改 server.py",
+    "status": "done",
+    "level": "L3",
+    "acceptance": [
+      "移除对 providers 的依赖",
+      "移除已删除工具的注册",
+      "服务器能启动并只暴露 clink + version 工具",
+      "不需要 API keys 即可启动"
+    ],
+    "blockedBy": ["删除不需要的工具文件", "删除 providers 目录", "清理 systemprompts"],
+    "blocks": ["清理测试和文档"]
+  },
+  {
+    "name": "清理测试和文档",
+    "status": "done",
+    "level": "L1",
+    "acceptance": [
+      "删除已删除工具的测试文件",
+      "保留 clink 相关测试",
+      "更新 README 说明新定位"
+    ],
+    "blockedBy": ["修改 server.py"],
+    "blocks": []
+  }
+]

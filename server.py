@@ -44,32 +44,15 @@ from mcp.types import (  # noqa: E402
 )
 
 from config import (  # noqa: E402
-    DEFAULT_MODEL,
     __version__,
 )
 from tools import (  # noqa: E402
-    AnalyzeTool,
-    ChallengeTool,
-    ChatTool,
     CLinkTool,
-    CodeReviewTool,
-    ConsensusTool,
-    DebugIssueTool,
-    DocgenTool,
-    ListModelsTool,
-    LookupTool,
-    PlannerTool,
-    PrecommitTool,
-    RefactorTool,
-    SecauditTool,
-    TestGenTool,
-    ThinkDeepTool,
-    TracerTool,
     VersionTool,
 )
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
-from utils.env import env_override_enabled, get_env  # noqa: E402
+from utils.env import get_env  # noqa: E402
 
 # Configure logging for server operations
 # Can be controlled via LOG_LEVEL environment variable (DEBUG, INFO, WARNING, ERROR)
@@ -151,13 +134,6 @@ except Exception as e:
     print(f"Warning: Could not set up file logging: {e}", file=sys.stderr)
 
 logger = logging.getLogger(__name__)
-
-# Log PAL_MCP_FORCE_ENV_OVERRIDE configuration for transparency
-if env_override_enabled():
-    logger.info("PAL_MCP_FORCE_ENV_OVERRIDE enabled - .env file values will override system environment variables")
-    logger.debug("Environment override prevents conflicts between different AI tools passing cached API keys")
-else:
-    logger.debug("PAL_MCP_FORCE_ENV_OVERRIDE disabled - system environment variables take precedence")
 
 
 # Create the MCP server instance with a unique name identifier
@@ -255,117 +231,20 @@ def filter_disabled_tools(all_tools: dict[str, Any]) -> dict[str, Any]:
     return enabled_tools
 
 
-# Initialize the tool registry with all available AI-powered tools
-# Each tool provides specialized functionality for different development tasks
-# Tools are instantiated once and reused across requests (stateless design)
+# Initialize the tool registry with clink-only tools
+# Clink-only mode: Only CLinkTool and VersionTool are available
+# No AI provider dependencies required
 TOOLS = {
-    "chat": ChatTool(),  # Interactive development chat and brainstorming
     "clink": CLinkTool(),  # Bridge requests to configured AI CLIs
-    "thinkdeep": ThinkDeepTool(),  # Step-by-step deep thinking workflow with expert analysis
-    "planner": PlannerTool(),  # Interactive sequential planner using workflow architecture
-    "consensus": ConsensusTool(),  # Step-by-step consensus workflow with multi-model analysis
-    "codereview": CodeReviewTool(),  # Comprehensive step-by-step code review workflow with expert analysis
-    "precommit": PrecommitTool(),  # Step-by-step pre-commit validation workflow
-    "debug": DebugIssueTool(),  # Root cause analysis and debugging assistance
-    "secaudit": SecauditTool(),  # Comprehensive security audit with OWASP Top 10 and compliance coverage
-    "docgen": DocgenTool(),  # Step-by-step documentation generation with complexity analysis
-    "analyze": AnalyzeTool(),  # General-purpose file and code analysis
-    "refactor": RefactorTool(),  # Step-by-step refactoring analysis workflow with expert validation
-    "tracer": TracerTool(),  # Static call path prediction and control flow analysis
-    "testgen": TestGenTool(),  # Step-by-step test generation workflow with expert validation
-    "challenge": ChallengeTool(),  # Critical challenge prompt wrapper to avoid automatic agreement
-    "apilookup": LookupTool(),  # Quick web/API lookup instructions
-    "listmodels": ListModelsTool(),  # List all available AI models by provider
     "version": VersionTool(),  # Display server version and system information
 }
-TOOLS = filter_disabled_tools(TOOLS)
 
-# Rich prompt templates for all tools
+# Rich prompt templates for clink-only tools
 PROMPT_TEMPLATES = {
-    "chat": {
-        "name": "chat",
-        "description": "Chat and brainstorm ideas",
-        "template": "Chat with {model} about this",
-    },
     "clink": {
         "name": "clink",
         "description": "Forward a request to a configured AI CLI (e.g., Gemini)",
         "template": "Use clink with cli_name=<cli> to run this prompt",
-    },
-    "thinkdeep": {
-        "name": "thinkdeeper",
-        "description": "Step-by-step deep thinking workflow with expert analysis",
-        "template": "Start comprehensive deep thinking workflow with {model} using {thinking_mode} thinking mode",
-    },
-    "planner": {
-        "name": "planner",
-        "description": "Break down complex ideas, problems, or projects into multiple manageable steps",
-        "template": "Create a detailed plan with {model}",
-    },
-    "consensus": {
-        "name": "consensus",
-        "description": "Step-by-step consensus workflow with multi-model analysis",
-        "template": "Start comprehensive consensus workflow with {model}",
-    },
-    "codereview": {
-        "name": "review",
-        "description": "Perform a comprehensive code review",
-        "template": "Perform a comprehensive code review with {model}",
-    },
-    "precommit": {
-        "name": "precommit",
-        "description": "Step-by-step pre-commit validation workflow",
-        "template": "Start comprehensive pre-commit validation workflow with {model}",
-    },
-    "debug": {
-        "name": "debug",
-        "description": "Debug an issue or error",
-        "template": "Help debug this issue with {model}",
-    },
-    "secaudit": {
-        "name": "secaudit",
-        "description": "Comprehensive security audit with OWASP Top 10 coverage",
-        "template": "Perform comprehensive security audit with {model}",
-    },
-    "docgen": {
-        "name": "docgen",
-        "description": "Generate comprehensive code documentation with complexity analysis",
-        "template": "Generate comprehensive documentation with {model}",
-    },
-    "analyze": {
-        "name": "analyze",
-        "description": "Analyze files and code structure",
-        "template": "Analyze these files with {model}",
-    },
-    "refactor": {
-        "name": "refactor",
-        "description": "Refactor and improve code structure",
-        "template": "Refactor this code with {model}",
-    },
-    "tracer": {
-        "name": "tracer",
-        "description": "Trace code execution paths",
-        "template": "Generate tracer analysis with {model}",
-    },
-    "testgen": {
-        "name": "testgen",
-        "description": "Generate comprehensive tests",
-        "template": "Generate comprehensive tests with {model}",
-    },
-    "challenge": {
-        "name": "challenge",
-        "description": "Challenge a statement critically without automatic agreement",
-        "template": "Challenge this statement critically",
-    },
-    "apilookup": {
-        "name": "apilookup",
-        "description": "Look up the latest API or SDK information",
-        "template": "Lookup latest API docs for {model}",
-    },
-    "listmodels": {
-        "name": "listmodels",
-        "description": "List available AI models",
-        "template": "List all available models",
     },
     "version": {
         "name": "version",
@@ -375,256 +254,8 @@ PROMPT_TEMPLATES = {
 }
 
 
-def configure_providers():
-    """
-    Configure and validate AI providers based on available API keys.
-
-    This function checks for API keys and registers the appropriate providers.
-    At least one valid API key (Gemini or OpenAI) is required.
-
-    Raises:
-        ValueError: If no valid API keys are found or conflicting configurations detected
-    """
-    # Log environment variable status for debugging
-    logger.debug("Checking environment variables for API keys...")
-    api_keys_to_check = ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "CUSTOM_API_URL"]
-    for key in api_keys_to_check:
-        value = get_env(key)
-        logger.debug(f"  {key}: {'[PRESENT]' if value else '[MISSING]'}")
-    from providers import ModelProviderRegistry
-    from providers.azure_openai import AzureOpenAIProvider
-    from providers.custom import CustomProvider
-    from providers.dial import DIALModelProvider
-    from providers.gemini import GeminiModelProvider
-    from providers.openai import OpenAIModelProvider
-    from providers.openrouter import OpenRouterProvider
-    from providers.shared import ProviderType
-    from providers.xai import XAIModelProvider
-    from utils.model_restrictions import get_restriction_service
-
-    valid_providers = []
-    has_native_apis = False
-    has_openrouter = False
-    has_custom = False
-
-    # Check for Gemini API key
-    gemini_key = get_env("GEMINI_API_KEY")
-    if gemini_key and gemini_key != "your_gemini_api_key_here":
-        valid_providers.append("Gemini")
-        has_native_apis = True
-        logger.info("Gemini API key found - Gemini models available")
-
-    # Check for OpenAI API key
-    openai_key = get_env("OPENAI_API_KEY")
-    logger.debug(f"OpenAI key check: key={'[PRESENT]' if openai_key else '[MISSING]'}")
-    if openai_key and openai_key != "your_openai_api_key_here":
-        valid_providers.append("OpenAI")
-        has_native_apis = True
-        logger.info("OpenAI API key found")
-    else:
-        if not openai_key:
-            logger.debug("OpenAI API key not found in environment")
-        else:
-            logger.debug("OpenAI API key is placeholder value")
-
-    # Check for Azure OpenAI configuration
-    azure_key = get_env("AZURE_OPENAI_API_KEY")
-    azure_endpoint = get_env("AZURE_OPENAI_ENDPOINT")
-    azure_models_available = False
-    if azure_key and azure_key != "your_azure_openai_key_here" and azure_endpoint:
-        try:
-            from providers.registries.azure import AzureModelRegistry
-
-            azure_registry = AzureModelRegistry()
-            if azure_registry.list_models():
-                valid_providers.append("Azure OpenAI")
-                has_native_apis = True
-                azure_models_available = True
-                logger.info("Azure OpenAI configuration detected")
-            else:
-                logger.warning(
-                    "Azure OpenAI models configuration is empty. Populate conf/azure_models.json or set AZURE_MODELS_CONFIG_PATH."
-                )
-        except Exception as exc:
-            logger.warning(f"Failed to load Azure OpenAI models: {exc}")
-
-    # Check for X.AI API key
-    xai_key = get_env("XAI_API_KEY")
-    if xai_key and xai_key != "your_xai_api_key_here":
-        valid_providers.append("X.AI (GROK)")
-        has_native_apis = True
-        logger.info("X.AI API key found - GROK models available")
-
-    # Check for DIAL API key
-    dial_key = get_env("DIAL_API_KEY")
-    if dial_key and dial_key != "your_dial_api_key_here":
-        valid_providers.append("DIAL")
-        has_native_apis = True
-        logger.info("DIAL API key found - DIAL models available")
-
-    # Check for OpenRouter API key
-    openrouter_key = get_env("OPENROUTER_API_KEY")
-    logger.debug(f"OpenRouter key check: key={'[PRESENT]' if openrouter_key else '[MISSING]'}")
-    if openrouter_key and openrouter_key != "your_openrouter_api_key_here":
-        valid_providers.append("OpenRouter")
-        has_openrouter = True
-        logger.info("OpenRouter API key found - Multiple models available via OpenRouter")
-    else:
-        if not openrouter_key:
-            logger.debug("OpenRouter API key not found in environment")
-        else:
-            logger.debug("OpenRouter API key is placeholder value")
-
-    # Check for custom API endpoint (Ollama, vLLM, etc.)
-    custom_url = get_env("CUSTOM_API_URL")
-    if custom_url:
-        # IMPORTANT: Always read CUSTOM_API_KEY even if empty
-        # - Some providers (vLLM, LM Studio, enterprise APIs) require authentication
-        # - Others (Ollama) work without authentication (empty key)
-        # - DO NOT remove this variable - it's needed for provider factory function
-        custom_key = get_env("CUSTOM_API_KEY", "") or ""  # Default to empty (Ollama doesn't need auth)
-        custom_model = get_env("CUSTOM_MODEL_NAME", "llama3.2") or "llama3.2"
-        valid_providers.append(f"Custom API ({custom_url})")
-        has_custom = True
-        logger.info(f"Custom API endpoint found: {custom_url} with model {custom_model}")
-        if custom_key:
-            logger.debug("Custom API key provided for authentication")
-        else:
-            logger.debug("No custom API key provided (using unauthenticated access)")
-
-    # Register providers in priority order:
-    # 1. Native APIs first (most direct and efficient)
-    registered_providers = []
-
-    if has_native_apis:
-        if gemini_key and gemini_key != "your_gemini_api_key_here":
-            ModelProviderRegistry.register_provider(ProviderType.GOOGLE, GeminiModelProvider)
-            registered_providers.append(ProviderType.GOOGLE.value)
-            logger.debug(f"Registered provider: {ProviderType.GOOGLE.value}")
-        if openai_key and openai_key != "your_openai_api_key_here":
-            ModelProviderRegistry.register_provider(ProviderType.OPENAI, OpenAIModelProvider)
-            registered_providers.append(ProviderType.OPENAI.value)
-            logger.debug(f"Registered provider: {ProviderType.OPENAI.value}")
-        if azure_models_available:
-            ModelProviderRegistry.register_provider(ProviderType.AZURE, AzureOpenAIProvider)
-            registered_providers.append(ProviderType.AZURE.value)
-            logger.debug(f"Registered provider: {ProviderType.AZURE.value}")
-        if xai_key and xai_key != "your_xai_api_key_here":
-            ModelProviderRegistry.register_provider(ProviderType.XAI, XAIModelProvider)
-            registered_providers.append(ProviderType.XAI.value)
-            logger.debug(f"Registered provider: {ProviderType.XAI.value}")
-        if dial_key and dial_key != "your_dial_api_key_here":
-            ModelProviderRegistry.register_provider(ProviderType.DIAL, DIALModelProvider)
-            registered_providers.append(ProviderType.DIAL.value)
-            logger.debug(f"Registered provider: {ProviderType.DIAL.value}")
-
-    # 2. Custom provider second (for local/private models)
-    if has_custom:
-        # Factory function that creates CustomProvider with proper parameters
-        def custom_provider_factory(api_key=None):
-            # api_key is CUSTOM_API_KEY (can be empty for Ollama), base_url from CUSTOM_API_URL
-            base_url = get_env("CUSTOM_API_URL", "") or ""
-            return CustomProvider(api_key=api_key or "", base_url=base_url)  # Use provided API key or empty string
-
-        ModelProviderRegistry.register_provider(ProviderType.CUSTOM, custom_provider_factory)
-        registered_providers.append(ProviderType.CUSTOM.value)
-        logger.debug(f"Registered provider: {ProviderType.CUSTOM.value}")
-
-    # 3. OpenRouter last (catch-all for everything else)
-    if has_openrouter:
-        ModelProviderRegistry.register_provider(ProviderType.OPENROUTER, OpenRouterProvider)
-        registered_providers.append(ProviderType.OPENROUTER.value)
-        logger.debug(f"Registered provider: {ProviderType.OPENROUTER.value}")
-
-    # Log all registered providers
-    if registered_providers:
-        logger.info(f"Registered providers: {', '.join(registered_providers)}")
-
-    # Require at least one valid provider
-    if not valid_providers:
-        raise ValueError(
-            "At least one API configuration is required. Please set either:\n"
-            "- GEMINI_API_KEY for Gemini models\n"
-            "- OPENAI_API_KEY for OpenAI models\n"
-            "- XAI_API_KEY for X.AI GROK models\n"
-            "- DIAL_API_KEY for DIAL models\n"
-            "- OPENROUTER_API_KEY for OpenRouter (multiple models)\n"
-            "- CUSTOM_API_URL for local models (Ollama, vLLM, etc.)"
-        )
-
-    logger.info(f"Available providers: {', '.join(valid_providers)}")
-
-    # Log provider priority
-    priority_info = []
-    if has_native_apis:
-        priority_info.append("Native APIs (Gemini, OpenAI)")
-    if has_custom:
-        priority_info.append("Custom endpoints")
-    if has_openrouter:
-        priority_info.append("OpenRouter (catch-all)")
-
-    if len(priority_info) > 1:
-        logger.info(f"Provider priority: {' → '.join(priority_info)}")
-
-    # Register cleanup function for providers
-    def cleanup_providers():
-        """Clean up all registered providers on shutdown."""
-        try:
-            registry = ModelProviderRegistry()
-            if hasattr(registry, "_initialized_providers"):
-                # Iterate over provider instances (values), not (type, instance) tuples
-                for provider in list(registry._initialized_providers.values()):
-                    try:
-                        if provider and hasattr(provider, "close"):
-                            provider.close()
-                    except Exception:
-                        # Logger might be closed during shutdown
-                        pass
-        except Exception:
-            # Silently ignore any errors during cleanup
-            pass
-
-    atexit.register(cleanup_providers)
-
-    # Check and log model restrictions
-    restriction_service = get_restriction_service()
-    restrictions = restriction_service.get_restriction_summary()
-
-    if restrictions:
-        logger.info("Model restrictions configured:")
-        for provider_name, allowed_models in restrictions.items():
-            if isinstance(allowed_models, list):
-                logger.info(f"  {provider_name}: {', '.join(allowed_models)}")
-            else:
-                logger.info(f"  {provider_name}: {allowed_models}")
-
-        # Validate restrictions against known models
-        provider_instances = {}
-        provider_types_to_validate = [ProviderType.GOOGLE, ProviderType.OPENAI, ProviderType.XAI, ProviderType.DIAL]
-        for provider_type in provider_types_to_validate:
-            provider = ModelProviderRegistry.get_provider(provider_type)
-            if provider:
-                provider_instances[provider_type] = provider
-
-        if provider_instances:
-            restriction_service.validate_against_known_models(provider_instances)
-    else:
-        logger.info("No model restrictions configured - all models allowed")
-
-    # Check if auto mode has any models available after restrictions
-    from config import IS_AUTO_MODE
-
-    if IS_AUTO_MODE:
-        available_models = ModelProviderRegistry.get_available_models(respect_restrictions=True)
-        if not available_models:
-            logger.error(
-                "Auto mode is enabled but no models are available after applying restrictions. "
-                "Please check your OPENAI_ALLOWED_MODELS and GOOGLE_ALLOWED_MODELS settings."
-            )
-            raise ValueError(
-                "No models available for auto mode due to restrictions. "
-                "Please adjust your allowed model settings or disable auto mode."
-            )
+# Clink-only mode: No provider configuration needed
+# CLinkTool forwards requests to external AI CLIs without requiring API keys
 
 
 @server.list_tools()
@@ -756,112 +387,14 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
     except Exception:
         pass
 
-    # Handle thread context reconstruction if continuation_id is present
-    if "continuation_id" in arguments and arguments["continuation_id"]:
-        continuation_id = arguments["continuation_id"]
-        logger.debug(f"Resuming conversation thread: {continuation_id}")
-        logger.debug(
-            f"[CONVERSATION_DEBUG] Tool '{name}' resuming thread {continuation_id} with {len(arguments)} arguments"
-        )
-        logger.debug(f"[CONVERSATION_DEBUG] Original arguments keys: {list(arguments.keys())}")
-
-        # Log to activity file for monitoring
-        try:
-            mcp_activity_logger = logging.getLogger("mcp_activity")
-            mcp_activity_logger.info(f"CONVERSATION_RESUME: {name} resuming thread {continuation_id}")
-        except Exception:
-            pass
-
-        arguments = await reconstruct_thread_context(arguments)
-        logger.debug(f"[CONVERSATION_DEBUG] After thread reconstruction, arguments keys: {list(arguments.keys())}")
-        if "_remaining_tokens" in arguments:
-            logger.debug(f"[CONVERSATION_DEBUG] Remaining token budget: {arguments['_remaining_tokens']:,}")
-
-    # Route to AI-powered tools that require Gemini API calls
+    # Clink-only mode: No conversation continuation support needed
+    # Route to clink-only tools (no model validation needed)
     if name in TOOLS:
         logger.info(f"Executing tool '{name}' with {len(arguments)} parameter(s)")
         tool = TOOLS[name]
 
-        # EARLY MODEL RESOLUTION AT MCP BOUNDARY
-        # Resolve model before passing to tool - this ensures consistent model handling
-        # NOTE: Consensus tool is exempt as it handles multiple models internally
-        from providers.registry import ModelProviderRegistry
-        from utils.file_utils import check_total_file_size
-        from utils.model_context import ModelContext
-
-        # Get model from arguments or use default
-        model_name = arguments.get("model") or DEFAULT_MODEL
-        logger.debug(f"Initial model for {name}: {model_name}")
-
-        # Parse model:option format if present
-        model_name, model_option = parse_model_option(model_name)
-        if model_option:
-            logger.info(f"Parsed model format - model: '{model_name}', option: '{model_option}'")
-        else:
-            logger.info(f"Parsed model format - model: '{model_name}'")
-
-        # Consensus tool handles its own model configuration validation
-        # No special handling needed at server level
-
-        # Skip model resolution for tools that don't require models (e.g., planner)
-        if not tool.requires_model():
-            logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
-            # Execute tool directly without model context
-            return await tool.execute(arguments)
-
-        # Handle auto mode at MCP boundary - resolve to specific model
-        if model_name.lower() == "auto":
-            # Get tool category to determine appropriate model
-            tool_category = tool.get_model_category()
-            resolved_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
-            logger.info(f"Auto mode resolved to {resolved_model} for {name} (category: {tool_category.value})")
-            model_name = resolved_model
-            # Update arguments with resolved model
-            arguments["model"] = model_name
-
-        # Validate model availability at MCP boundary
-        provider = ModelProviderRegistry.get_provider_for_model(model_name)
-        if not provider:
-            # Get list of available models for error message
-            available_models = list(ModelProviderRegistry.get_available_models(respect_restrictions=True).keys())
-            tool_category = tool.get_model_category()
-            suggested_model = ModelProviderRegistry.get_preferred_fallback_model(tool_category)
-
-            error_message = (
-                f"Model '{model_name}' is not available with current API keys. "
-                f"Available models: {', '.join(available_models)}. "
-                f"Suggested model for {name}: '{suggested_model}' "
-                f"(category: {tool_category.value})"
-            )
-            error_output = ToolOutput(
-                status="error",
-                content=error_message,
-                content_type="text",
-                metadata={"tool_name": name, "requested_model": model_name},
-            )
-            raise ToolExecutionError(error_output.model_dump_json())
-
-        # Create model context with resolved model and option
-        model_context = ModelContext(model_name, model_option)
-        arguments["_model_context"] = model_context
-        arguments["_resolved_model_name"] = model_name
-        logger.debug(
-            f"Model context created for {model_name} with {model_context.capabilities.context_window} token capacity"
-        )
-        if model_option:
-            logger.debug(f"Model option stored in context: '{model_option}'")
-
-        # EARLY FILE SIZE VALIDATION AT MCP BOUNDARY
-        # Check file sizes before tool execution using resolved model
-        argument_files = arguments.get("absolute_file_paths")
-        if argument_files:
-            logger.debug(f"Checking file sizes for {len(argument_files)} files with model {model_name}")
-            file_size_check = check_total_file_size(argument_files, model_name)
-            if file_size_check:
-                logger.warning(f"File size check failed for {name} with model {model_name}")
-                raise ToolExecutionError(ToolOutput(**file_size_check).model_dump_json())
-
-        # Execute tool with pre-resolved model context
+        # Execute tool directly without model validation
+        # Clink-only mode: Tools don't require AI provider configuration
         result = await tool.execute(arguments)
         logger.info(f"Tool '{name}' execution completed")
 
@@ -1448,52 +981,26 @@ async def handle_get_prompt(name: str, arguments: dict[str, Any] = None) -> GetP
 
 async def main():
     """
-    Main entry point for the MCP server.
+    Main entry point for the MCP server (clink-only mode).
 
-    Initializes the Gemini API configuration and starts the server using
-    stdio transport. The server will continue running until the client
-    disconnects or an error occurs.
+    Starts the server using stdio transport. The server will continue running
+    until the client disconnects or an error occurs.
 
     The server communicates via standard input/output streams using the
     MCP protocol's JSON-RPC message format.
-    """
-    # Validate and configure providers based on available API keys
-    configure_providers()
 
+    Clink-only mode: No AI provider configuration or API keys required.
+    """
     # Log startup message
-    logger.info("PAL MCP Server starting up...")
+    logger.info("PAL MCP Server (clink-only mode) starting up...")
     logger.info(f"Log level: {log_level}")
 
     # Note: MCP client info will be logged during the protocol handshake
     # (when handle_list_tools is called)
 
-    # Log current model mode
-    from config import IS_AUTO_MODE
-
-    if IS_AUTO_MODE:
-        logger.info("Model mode: AUTO (CLI will select the best model for each task)")
-    else:
-        logger.info(f"Model mode: Fixed model '{DEFAULT_MODEL}'")
-
-    # Import here to avoid circular imports
-    from config import DEFAULT_THINKING_MODE_THINKDEEP
-
-    logger.info(f"Default thinking mode (ThinkDeep): {DEFAULT_THINKING_MODE_THINKDEEP}")
-
     logger.info(f"Available tools: {list(TOOLS.keys())}")
     logger.info("Server ready - waiting for tool requests...")
-
-    # Prepare dynamic instructions for the MCP client based on model mode
-    if IS_AUTO_MODE:
-        handshake_instructions = (
-            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
-            "When no model is mentioned, first use the `listmodels` tool from PAL to obtain available models to choose the best one from."
-        )
-    else:
-        handshake_instructions = (
-            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
-            f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
-        )
+    logger.info("Clink-only mode: Forwarding requests to external AI CLIs")
 
     # Run the server using stdio transport (standard input/output)
     # This allows the server to be launched by MCP clients as a subprocess
@@ -1502,9 +1009,9 @@ async def main():
             read_stream,
             write_stream,
             InitializationOptions(
-                server_name="PAL",
+                server_name="PAL-Clink",
                 server_version=__version__,
-                instructions=handshake_instructions,
+                instructions="Use the clink tool to forward requests to configured AI CLIs.",
                 capabilities=ServerCapabilities(
                     tools=ToolsCapability(),  # Advertise tool support capability
                     prompts=PromptsCapability(),  # Advertise prompt support capability
