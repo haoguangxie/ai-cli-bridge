@@ -6,11 +6,13 @@ from .base import BaseParser, ParsedCLIResponse, ParserError
 from .claude import ClaudeJSONParser
 from .codex import CodexJSONLParser
 from .gemini import GeminiJSONParser
+from .opencode import OpenCodeJSONParser
 
 _PARSER_CLASSES: dict[str, type[BaseParser]] = {
     CodexJSONLParser.name: CodexJSONLParser,
     GeminiJSONParser.name: GeminiJSONParser,
     ClaudeJSONParser.name: ClaudeJSONParser,
+    OpenCodeJSONParser.name: OpenCodeJSONParser,
 }
 
 
