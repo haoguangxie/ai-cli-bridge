@@ -39,6 +39,7 @@ class OpenCodeJSONParser(BaseParser):
         # Extract content from events
         for event in events:
             event_type = event.get("type", "")
+            part = event.get("part", {})
 
             if event_type == "error":
                 error_data = event.get("error", {})
@@ -48,8 +49,8 @@ class OpenCodeJSONParser(BaseParser):
                 metadata["error"] = error_data
 
             elif event_type == "text":
-                # Text content from the assistant
-                text = event.get("text", "")
+                # Text content from the assistant (in part.text)
+                text = part.get("text", "") or event.get("text", "")
                 if text:
                     text_parts.append(text)
 
@@ -75,6 +76,12 @@ class OpenCodeJSONParser(BaseParser):
                     "input": tool_input,
                 })
 
+            elif event_type == "step_finish":
+                # Step finish contains token usage
+                tokens = part.get("tokens", {})
+                if tokens:
+                    metadata["token_usage"] = tokens
+
             elif event_type == "session":
                 # Session metadata
                 session_id = event.get("sessionID")
@@ -92,6 +99,10 @@ class OpenCodeJSONParser(BaseParser):
                 model = event.get("model")
                 if model:
                     metadata["model_used"] = model
+
+            # Extract session ID from any event
+            if "sessionID" in event and "session_id" not in metadata:
+                metadata["session_id"] = event["sessionID"]
 
         # Build response content
         response_text = "".join(text_parts).strip()
