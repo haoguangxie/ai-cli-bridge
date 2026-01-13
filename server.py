@@ -249,7 +249,7 @@ PROMPT_TEMPLATES = {
     "version": {
         "name": "version",
         "description": "Show server version and system information",
-        "template": "Show PAL MCP Server version",
+        "template": "Show AI CLI Bridge version",
     },
 }
 
@@ -992,7 +992,7 @@ async def main():
     Clink-only mode: No AI provider configuration or API keys required.
     """
     # Log startup message
-    logger.info("PAL MCP Server (clink-only mode) starting up...")
+    logger.info("AI CLI Bridge starting up...")
     logger.info(f"Log level: {log_level}")
 
     # Note: MCP client info will be logged during the protocol handshake
@@ -1009,7 +1009,7 @@ async def main():
             read_stream,
             write_stream,
             InitializationOptions(
-                server_name="PAL-Clink",
+                server_name="ai-cli-bridge",
                 server_version=__version__,
                 instructions="Use the clink tool to forward requests to configured AI CLIs.",
                 capabilities=ServerCapabilities(
@@ -1021,7 +1021,7 @@ async def main():
 
 
 def run():
-    """Console script entry point for pal-mcp-server."""
+    """Console script entry point for ai-cli-bridge."""
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

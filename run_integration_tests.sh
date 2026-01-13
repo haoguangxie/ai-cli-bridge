@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# PAL MCP Server - Run Integration Tests
+# AI CLI Bridge - Run Integration Tests
 # This script runs integration tests that require API keys
 # Run this locally on your Mac to ensure everything works end-to-end
 
 set -e  # Exit on any error
 
-echo "🧪 Running Integration Tests for PAL MCP Server"
+echo "🧪 Running Integration Tests for AI CLI Bridge"
 echo "=============================================="
 echo "These tests use real API calls with your configured keys"
 echo ""

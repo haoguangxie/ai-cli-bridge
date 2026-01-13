@@ -754,7 +754,7 @@ setup_venv() {
                     print_error "Permission denied creating virtual environment"
                     echo ""
                     echo "Try running in a different directory:"
-                    echo "  cd ~ && git clone <repository-url> && cd pal-mcp-server && ./run-server.sh"
+                    echo "  cd ~ && git clone <repository-url> && cd ai-cli-bridge && ./run-server.sh"
                     echo ""
                     exit 1
                 else
@@ -961,7 +961,7 @@ install_dependencies() {
     fi
 
     echo ""
-    print_info "Setting up PAL MCP Server..."
+    print_info "Setting up AI CLI Bridge..."
     echo "Installing required components:"
     echo "  • MCP protocol library"
     echo "  • AI model connectors"
@@ -1255,7 +1255,7 @@ check_claude_cli_integration() {
         echo ""
         print_warning "Claude CLI not found"
         echo ""
-        read -p "Would you like to add PAL to Claude Code? (Y/n): " -n 1 -r
+        read -p "Would you like to add AI CLI Bridge to Claude Code? (Y/n): " -n 1 -r
         echo ""
         if [[ $REPLY =~ ^[Nn]$ ]]; then
             print_info "Skipping Claude Code integration"
@@ -1275,9 +1275,9 @@ check_claude_cli_integration() {
         claude mcp remove "$legacy_name" -s user >/dev/null 2>&1 || true
     done
 
-    # Check if pal is registered
+    # Check if ai-cli-bridge is registered
     local mcp_list=$(claude mcp list 2>/dev/null)
-    if echo "$mcp_list" | grep -q "pal"; then
+    if echo "$mcp_list" | grep -q "ai-cli-bridge"; then
         # Check if it's using the old Docker command
         if echo "$mcp_list" | grep -E "zen.*docker|zen.*compose" &>/dev/null; then
             print_warning "Found old Docker-based Zen registration, updating..."
@@ -1296,14 +1296,14 @@ check_claude_cli_integration() {
                 done <<< "$env_vars"
             fi
             
-            local claude_cmd="claude mcp add pal -s user$env_args -- \"$python_cmd\" \"$server_path\""
+            local claude_cmd="claude mcp add ai-cli-bridge -s user$env_args -- \"$python_cmd\" \"$server_path\""
             if eval "$claude_cmd" 2>/dev/null; then
-                print_success "Updated PAL to become a standalone script with environment variables"
+                print_success "Updated AI CLI Bridge to become a standalone script with environment variables"
                 return 0
             else
                 echo ""
                 echo "Failed to update MCP registration. Please run manually:"
-                echo "  claude mcp remove pal -s user"
+                echo "  claude mcp remove ai-cli-bridge -s user"
                 echo "  $claude_cmd"
                 return 1
             fi
@@ -1313,8 +1313,8 @@ check_claude_cli_integration() {
             if echo "$mcp_list" | grep -F "$server_path" &>/dev/null; then
                 return 0
             else
-                print_warning "PAL registered with different path, updating..."
-                claude mcp remove pal -s user 2>/dev/null || true
+                print_warning "AI CLI Bridge registered with different path, updating..."
+                claude mcp remove ai-cli-bridge -s user 2>/dev/null || true
 
                 # Re-add with current path and environment variables
                 local env_vars=$(parse_env_variables)
@@ -1329,14 +1329,14 @@ check_claude_cli_integration() {
                     done <<< "$env_vars"
                 fi
                 
-                local claude_cmd="claude mcp add pal -s user$env_args -- \"$python_cmd\" \"$server_path\""
+                local claude_cmd="claude mcp add ai-cli-bridge -s user$env_args -- \"$python_cmd\" \"$server_path\""
                 if eval "$claude_cmd" 2>/dev/null; then
-                    print_success "Updated PAL with current path and environment variables"
+                    print_success "Updated AI CLI Bridge with current path and environment variables"
                     return 0
                 else
                     echo ""
                     echo "Failed to update MCP registration. Please run manually:"
-                    echo "  claude mcp remove pal -s user"
+                    echo "  claude mcp remove ai-cli-bridge -s user"
                     echo "  $claude_cmd"
                     return 1
                 fi
@@ -1345,7 +1345,7 @@ check_claude_cli_integration() {
     else
         # Not registered at all, ask user if they want to add it
         echo ""
-        read -p "Add PAL to Claude Code? (Y/n): " -n 1 -r
+        read -p "Add AI CLI Bridge to Claude Code? (Y/n): " -n 1 -r
         echo ""
         if [[ $REPLY =~ ^[Nn]$ ]]; then
             local env_vars=$(parse_env_variables)
@@ -1361,11 +1361,11 @@ check_claude_cli_integration() {
             fi
             
             print_info "To add manually later, run:"
-            echo "  claude mcp add pal -s user$env_args -- $python_cmd $server_path"
+            echo "  claude mcp add ai-cli-bridge -s user$env_args -- $python_cmd $server_path"
             return 0
         fi
 
-        print_info "Registering PAL with Claude Code..."
+        print_info "Registering AI CLI Bridge with Claude Code..."
         
         # Add with environment variables
         local env_vars=$(parse_env_variables)
@@ -1380,9 +1380,9 @@ check_claude_cli_integration() {
             done <<< "$env_vars"
         fi
         
-        local claude_cmd="claude mcp add pal -s user$env_args -- \"$python_cmd\" \"$server_path\""
+        local claude_cmd="claude mcp add ai-cli-bridge -s user$env_args -- \"$python_cmd\" \"$server_path\""
         if eval "$claude_cmd" 2>/dev/null; then
-            print_success "Successfully added PAL to Claude Code with environment variables"
+            print_success "Successfully added AI CLI Bridge to Claude Code with environment variables"
             return 0
         else
             echo ""
@@ -1414,7 +1414,7 @@ check_claude_desktop_integration() {
     legacy_names_csv=$(IFS=,; echo "${LEGACY_MCP_NAMES[*]}")
 
     echo ""
-    read -p "Configure PAL for Claude Desktop? (Y/n): " -n 1 -r
+    read -p "Configure AI CLI Bridge for Claude Desktop? (Y/n): " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Nn]$ ]]; then
         print_info "Skipping Claude Desktop integration"
@@ -1497,7 +1497,7 @@ for container in ('mcpServers', 'servers'):
         for key in legacy_keys:
             servers.pop(key, None)
 
-# Add pal server
+# Add ai-cli-bridge server
 pal_config = {
     'command': '$python_cmd',
     'args': ['$server_path']
@@ -1546,7 +1546,7 @@ import sys
 
 config = {'mcpServers': {}}
 
-# Add pal server
+# Add ai-cli-bridge server
 pal_config = {
     'command': '$python_cmd',
     'args': ['$server_path']
@@ -1610,7 +1610,7 @@ with open('$temp_file', 'w') as f:
         cat << EOF
 {
   "mcpServers": {
-    "pal": {
+    "ai-cli-bridge": {
       "command": "$python_cmd",
       "args": ["$server_path"]$(if [[ -n "$example_env" ]]; then echo ","; fi)$(if [[ -n "$example_env" ]]; then echo "
       \"env\": {
@@ -1626,7 +1626,7 @@ EOF
 # Check and update Gemini CLI configuration
 check_gemini_cli_integration() {
     local script_dir="$1"
-    local pal_wrapper="$script_dir/pal-mcp-server"
+    local pal_wrapper="$script_dir/ai-cli-bridge"
 
     # Check if Gemini settings file exists
     local gemini_config="$HOME/.gemini/settings.json"
@@ -1652,7 +1652,7 @@ legacy = [n for n in os.environ.get("PAL_LEGACY_NAMES", "").split(",") if n]
 wrapper = os.environ["PAL_WRAPPER"]
 
 changed = False
-has_pal = False
+has_bridge = False
 
 try:
     data = json.loads(config_path.read_text())
@@ -1671,39 +1671,39 @@ for key in legacy:
     if servers.pop(key, None) is not None:
         changed = True
 
-pal_cfg = servers.get("pal")
+pal_cfg = servers.get("ai-cli-bridge")
 if isinstance(pal_cfg, dict):
-    has_pal = True
+    has_bridge = True
     if pal_cfg.get("command") != wrapper:
         pal_cfg["command"] = wrapper
-        servers["pal"] = pal_cfg
+        servers["ai-cli-bridge"] = pal_cfg
         changed = True
 
 if changed:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(data, indent=2))
 
-status = ("CHANGED" if changed else "UNCHANGED") + ":" + ("HAS_PAL" if has_pal else "NO_PAL")
+status = ("CHANGED" if changed else "UNCHANGED") + ":" + ("HAS_BRIDGE" if has_bridge else "NO_BRIDGE")
 sys.stdout.write(status)
 sys.exit(0)
 PY
     ) || true
 
     local gemini_changed=false
-    local gemini_has_pal=false
+    local gemini_has_bridge=false
     [[ "$gemini_status" == CHANGED:* ]] && gemini_changed=true
-    [[ "$gemini_status" == *:HAS_PAL ]] && gemini_has_pal=true
+    [[ "$gemini_status" == *:HAS_BRIDGE ]] && gemini_has_bridge=true
 
-    if [[ "$gemini_has_pal" == true ]]; then
+    if [[ "$gemini_has_bridge" == true ]]; then
         if [[ "$gemini_changed" == true ]]; then
             print_success "Removed legacy Gemini MCP entries"
         fi
         return 0
     fi
 
-    # Ask user if they want to add PAL to Gemini CLI
+    # Ask user if they want to add AI CLI Bridge to Gemini CLI
     echo ""
-    read -p "Configure PAL for Gemini CLI? (Y/n): " -n 1 -r
+    read -p "Configure AI CLI Bridge for Gemini CLI? (Y/n): " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Nn]$ ]]; then
         print_info "Skipping Gemini CLI integration"
@@ -1721,7 +1721,7 @@ cd "$DIR"
 exec .pal_venv/bin/python server.py "$@"
 EOF
         chmod +x "$pal_wrapper"
-        print_success "Created pal-mcp-server wrapper script"
+        print_success "Created ai-cli-bridge wrapper script"
     fi
 
     # Update Gemini settings
@@ -1730,7 +1730,7 @@ EOF
     # Create backup
     cp "$gemini_config" "${gemini_config}.backup_$(date +%Y%m%d_%H%M%S)"
 
-    # Add pal configuration using Python for proper JSON handling
+    # Add ai-cli-bridge configuration using Python for proper JSON handling
     local temp_file=$(mktemp)
     python3 -c "
 import json
@@ -1744,7 +1744,7 @@ try:
     if 'mcpServers' not in config:
         config['mcpServers'] = {}
 
-    # Add pal server
+    # Add ai-cli-bridge server
     config['mcpServers']['pal'] = {
         'command': '$pal_wrapper'
     }
@@ -1760,7 +1760,7 @@ except Exception as e:
     if [[ $? -eq 0 ]]; then
         print_success "Successfully configured Gemini CLI"
         echo "  Config: $gemini_config"
-        echo "  Restart Gemini CLI to use PAL MCP Server"
+        echo "  Restart Gemini CLI to use AI CLI Bridge"
     else
         print_error "Failed to update Gemini CLI config"
         echo "Manual config location: $gemini_config"
@@ -1768,7 +1768,7 @@ except Exception as e:
         cat << EOF
 {
   "mcpServers": {
-    "pal": {
+    "ai-cli-bridge": {
       "command": "$pal_wrapper"
     }
   }
@@ -1841,14 +1841,14 @@ PY
         fi
     fi
 
-    local codex_has_pal=false
+    local codex_has_bridge=false
     if [[ -f "$codex_config" ]] && grep -q '\[mcp_servers\.pal\]' "$codex_config" 2>/dev/null; then
-        codex_has_pal=true
+        codex_has_bridge=true
     fi
 
-    if [[ "$codex_has_pal" == false ]]; then
+    if [[ "$codex_has_bridge" == false ]]; then
         echo ""
-        read -p "Configure PAL for Codex CLI? (Y/n): " -n 1 -r
+        read -p "Configure AI CLI Bridge for Codex CLI? (Y/n): " -n 1 -r
         echo ""
         if [[ $REPLY =~ ^[Nn]$ ]]; then
             print_info "Skipping Codex CLI integration"
@@ -1869,7 +1869,7 @@ PY
             echo ""
             echo "[mcp_servers.pal]"
             echo "command = \"bash\""
-            echo "args = [\"-c\", \"for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/pal-mcp-server.git pal-mcp-server; done; echo 'uvx not found' >&2; exit 1\"]"
+            echo "args = [\"-c\", \"for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge; done; echo 'uvx not found' >&2; exit 1\"]"
             echo "tool_timeout_sec = 1200"
             echo ""
             echo "[mcp_servers.pal.env]"
@@ -1894,7 +1894,7 @@ PY
 cat <<'CODExEOF'
 [mcp_servers.pal]
 command = "sh"
-args = ["-c", "exec \$(which uvx 2>/dev/null || echo uvx) --from git+https://github.com/BeehiveInnovations/pal-mcp-server.git pal-mcp-server"]
+args = ["-c", "exec \$(which uvx 2>/dev/null || echo uvx) --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge"]
 tool_timeout_sec = 1200
 
 [mcp_servers.pal.env]
@@ -1919,13 +1919,13 @@ CODExEOF
 
         print_success "Successfully configured Codex CLI"
         echo "  Config: $codex_config"
-        echo "  Restart Codex CLI to use PAL MCP Server"
-        codex_has_pal=true
+        echo "  Restart Codex CLI to use AI CLI Bridge"
+        codex_has_bridge=true
     else
         print_info "Codex CLI already configured; refreshing Codex settings..."
     fi
 
-    if [[ "$codex_has_pal" == true ]]; then
+    if [[ "$codex_has_bridge" == true ]]; then
         if ! grep -Eq '^\s*web_search_request\s*=' "$codex_config" 2>/dev/null; then
             echo ""
             print_info "Web search requests let Codex pull fresh documentation for PAL's API lookup tooling."
@@ -2063,7 +2063,7 @@ print_qwen_manual_instructions() {
         cat << EOF
 {
   "mcpServers": {
-    "pal": {
+    "ai-cli-bridge": {
       "command": "$python_cmd",
       "args": ["$server_path"],
       "cwd": "$script_dir",
@@ -2076,7 +2076,7 @@ EOF
         cat << EOF
 {
   "mcpServers": {
-    "pal": {
+    "ai-cli-bridge": {
       "command": "$python_cmd",
       "args": ["$server_path"],
       "cwd": "$script_dir"
@@ -2208,7 +2208,7 @@ PYCONF
         print_warning "Unable to parse Qwen CLI settings; replacing with a fresh entry may help."
     fi
 
-    local prompt="Configure PAL for Qwen CLI? (Y/n): "
+    local prompt="Configure AI CLI Bridge for Qwen CLI? (Y/n): "
     if [[ $config_status -eq 4 || $config_status -eq 5 ]]; then
         prompt="Update Qwen CLI pal configuration? (Y/n): "
     fi
@@ -2288,7 +2288,7 @@ PYUPDATE
     if [[ $update_status -eq 0 ]]; then
         print_success "Successfully configured Qwen CLI"
         echo "  Config: $qwen_config"
-        echo "  Restart Qwen CLI to use PAL MCP Server"
+        echo "  Restart Qwen CLI to use AI CLI Bridge"
     else
         print_error "Failed to update Qwen CLI config"
         if [[ -n "$update_output" ]]; then
@@ -2307,11 +2307,11 @@ display_config_instructions() {
     local script_dir=$(dirname "$server_path")
 
     echo ""
-    local config_header="PAL MCP SERVER CONFIGURATION"
+    local config_header="AI CLI Bridge SERVER CONFIGURATION"
     echo "===== $config_header ====="
     printf '%*s\n' "$((${#config_header} + 12))" | tr ' ' '='
     echo ""
-    echo "To use PAL MCP Server with your CLI clients:"
+    echo "To use AI CLI Bridge with your CLI clients:"
     echo ""
 
     print_info "1. For Claude Code (CLI):"
@@ -2325,7 +2325,7 @@ display_config_instructions() {
             fi
         done <<< "$env_vars"
     fi
-    echo -e "   ${GREEN}claude mcp add pal -s user$env_args -- $python_cmd $server_path${NC}"
+    echo -e "   ${GREEN}claude mcp add ai-cli-bridge -s user$env_args -- $python_cmd $server_path${NC}"
     echo ""
 
     print_info "2. For Claude Desktop:"
@@ -2356,7 +2356,7 @@ display_config_instructions() {
         cat << EOF
    {
      "mcpServers": {
-       "pal": {
+       "ai-cli-bridge": {
          "command": "$python_cmd",
          "args": ["$server_path"],
          "cwd": "$script_dir",
@@ -2371,7 +2371,7 @@ EOF
         cat << EOF
    {
      "mcpServers": {
-       "pal": {
+       "ai-cli-bridge": {
          "command": "$python_cmd",
          "args": ["$server_path"],
          "cwd": "$script_dir"
@@ -2399,8 +2399,8 @@ EOF
     cat << EOF
    {
      "mcpServers": {
-       "pal": {
-         "command": "$script_dir/pal-mcp-server"
+       "ai-cli-bridge": {
+         "command": "$script_dir/ai-cli-bridge"
        }
      }
    }
@@ -2414,7 +2414,7 @@ EOF
         cat << EOF
    {
      "mcpServers": {
-       "pal": {
+       "ai-cli-bridge": {
          "command": "$python_cmd",
          "args": ["$server_path"],
          "cwd": "$script_dir",
@@ -2429,7 +2429,7 @@ EOF
         cat << EOF
    {
      "mcpServers": {
-       "pal": {
+       "ai-cli-bridge": {
          "command": "$python_cmd",
          "args": ["$server_path"],
          "cwd": "$script_dir"
@@ -2446,7 +2446,7 @@ EOF
     cat << EOF
    [mcp_servers.pal]
    command = "bash"
-   args = ["-c", "for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/pal-mcp-server.git pal-mcp-server; done; echo 'uvx not found' >&2; exit 1"]
+   args = ["-c", "for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge; done; echo 'uvx not found' >&2; exit 1"]
 
    [mcp_servers.pal.env]
    PATH = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin"
@@ -2545,7 +2545,7 @@ display_setup_instructions() {
 # Show help message
 show_help() {
     local version=$(get_version)
-    local header="🤖 PAL MCP Server v$version"
+    local header="🤖 AI CLI Bridge v$version"
     echo "$header"
     printf '%*s\n' "${#header}" | tr ' ' '='
     echo ""
@@ -2566,7 +2566,7 @@ show_help() {
     echo "  $0 --clear-cache Clear Python cache (fixes import issues)"
     echo ""
     echo "For more information, visit:"
-    echo "  https://github.com/BeehiveInnovations/pal-mcp-server"
+    echo "  https://github.com/BeehiveInnovations/ai-cli-bridge"
 }
 
 # Show version only
@@ -2641,7 +2641,7 @@ main() {
     esac
 
     # Display header
-    local main_header="🤖 PAL MCP Server"
+    local main_header="🤖 AI CLI Bridge"
     echo "$main_header"
     printf '%*s\n' "${#main_header}" | tr ' ' '='
 

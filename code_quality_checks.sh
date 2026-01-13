@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# PAL MCP Server - Code Quality Checks
+# AI CLI Bridge - Code Quality Checks
 # This script runs all required linting and testing checks before committing changes.
 # ALL checks must pass 100% for CI/CD to succeed.
 
 set -e  # Exit on any error
 
-echo "🔍 Running Code Quality Checks for PAL MCP Server"
+echo "🔍 Running Code Quality Checks for AI CLI Bridge"
 echo "================================================="
 
 # Determine Python command

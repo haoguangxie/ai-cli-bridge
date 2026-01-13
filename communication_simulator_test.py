@@ -1,7 +1,7 @@
 """
-Communication Simulator Test for PAL MCP Server
+Communication Simulator Test for AI CLI Bridge
 
-This script provides comprehensive end-to-end testing of the PAL MCP Server
+This script provides comprehensive end-to-end testing of the AI CLI Bridge
 by simulating real Claude CLI communications and validating conversation
 continuity, file handling, deduplication features, and clarification scenarios.
 
