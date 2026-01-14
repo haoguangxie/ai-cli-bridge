@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_TIMEOUT_SECONDS = 1800  # Hard timeout as fallback
-DEFAULT_IO_IDLE_TIMEOUT_SECONDS = 300  # 5 minutes without IO activity = stuck
+DEFAULT_IO_IDLE_TIMEOUT_SECONDS = 600  # 10 minutes without CPU activity = stuck
 DEFAULT_STREAM_LIMIT = 10 * 1024 * 1024  # 10MB per stream
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
