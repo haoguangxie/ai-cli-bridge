@@ -288,10 +288,10 @@ class BaseCLIAgent:
         start_time = time.monotonic()
         last_cpu_time = self._get_total_cpu_time(pid)
 
-        # Initialize global activity tracker for this CLI type
+        # Initialize/update global activity tracker for this CLI type
+        # Always update to current time when a new process starts
         async with _global_activity_lock:
-            if cli_name not in _global_last_activity:
-                _global_last_activity[cli_name] = start_time
+            _global_last_activity[cli_name] = start_time
 
         # Start the communicate task
         communicate_task = asyncio.create_task(process.communicate(input_data))
