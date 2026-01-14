@@ -21,6 +21,11 @@ from clink.parsers import BaseParser, ParsedCLIResponse, ParserError, get_parser
 
 logger = logging.getLogger("clink.agent")
 
+# Global activity tracker per CLI type
+# If any process of a CLI type is active, all processes of that type are considered active
+_global_last_activity: dict[str, float] = {}
+_global_activity_lock = asyncio.Lock()
+
 
 @dataclass
 class AgentOutput:
@@ -260,6 +265,10 @@ class BaseCLIAgent:
         considered stuck. This allows long-running processes that are actively
         doing work (like waiting for API responses) to continue.
 
+        Uses a GLOBAL activity tracker per CLI type: if ANY process of a CLI type
+        (e.g., codex) is active, ALL processes of that type are considered active.
+        This prevents timeout when multiple requests share backend resources.
+
         Args:
             process: The subprocess to communicate with
             input_data: Data to send to stdin
@@ -272,10 +281,17 @@ class BaseCLIAgent:
         Raises:
             asyncio.TimeoutError: If process is idle or exceeds hard timeout
         """
+        global _global_last_activity
+
         pid = process.pid
+        cli_name = self.client.name
         start_time = time.monotonic()
         last_cpu_time = self._get_total_cpu_time(pid)
-        last_activity_time = start_time
+
+        # Initialize global activity tracker for this CLI type
+        async with _global_activity_lock:
+            if cli_name not in _global_last_activity:
+                _global_last_activity[cli_name] = start_time
 
         # Start the communicate task
         communicate_task = asyncio.create_task(process.communicate(input_data))
@@ -299,10 +315,10 @@ class BaseCLIAgent:
                     )
                     raise asyncio.TimeoutError(f"Hard timeout after {hard_timeout}s")
 
-                # Check CPU activity
+                # Check CPU activity for THIS process
                 current_cpu_time = self._get_total_cpu_time(pid)
                 if current_cpu_time > last_cpu_time:
-                    # CPU activity detected, reset idle timer
+                    # CPU activity detected, update GLOBAL activity tracker
                     cpu_delta = current_cpu_time - last_cpu_time
                     self._logger.debug(
                         "CLI '%s' CPU activity: +%.3fs (total elapsed: %.1fs)",
@@ -311,17 +327,22 @@ class BaseCLIAgent:
                         elapsed,
                     )
                     last_cpu_time = current_cpu_time
-                    last_activity_time = current_time
-                else:
-                    # No CPU activity, check idle timeout
-                    idle_time = current_time - last_activity_time
-                    if idle_time >= idle_timeout:
-                        self._logger.warning(
-                            "CLI '%s' no CPU activity for %.1fs, considering stuck",
-                            self.client.name,
-                            idle_time,
-                        )
-                        raise asyncio.TimeoutError(f"No CPU activity for {idle_timeout}s")
+                    # Update global activity time for this CLI type
+                    async with _global_activity_lock:
+                        _global_last_activity[cli_name] = current_time
+
+                # Check idle timeout using GLOBAL activity tracker
+                async with _global_activity_lock:
+                    global_last_activity = _global_last_activity.get(cli_name, start_time)
+
+                idle_time = current_time - global_last_activity
+                if idle_time >= idle_timeout:
+                    self._logger.warning(
+                        "CLI '%s' no global CPU activity for %.1fs, considering stuck",
+                        self.client.name,
+                        idle_time,
+                    )
+                    raise asyncio.TimeoutError(f"No CPU activity for {idle_timeout}s")
 
         except asyncio.TimeoutError:
             communicate_task.cancel()
