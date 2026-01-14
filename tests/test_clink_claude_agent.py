@@ -16,9 +16,11 @@ class DummyProcess:
         self._stderr = stderr
         self.returncode = returncode
         self.stdin_data: bytes | None = None
+        self.pid = 99999  # Fake PID for testing
 
-    async def communicate(self, input_data):
-        self.stdin_data = input_data
+    async def communicate(self, input_data=None):
+        if input_data is not None:
+            self.stdin_data = input_data
         return self._stdout, self._stderr
 
 
