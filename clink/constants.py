@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_TIMEOUT_SECONDS = 1800  # Hard timeout as fallback
-DEFAULT_IO_IDLE_TIMEOUT_SECONDS = 600  # 10 minutes without CPU activity = stuck
+DEFAULT_IO_IDLE_TIMEOUT_SECONDS = 1200  # 20 minutes without CPU activity = stuck
 DEFAULT_STREAM_LIMIT = 10 * 1024 * 1024  # 10MB per stream
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -28,12 +28,6 @@ class CLIInternalDefaults:
 
 
 INTERNAL_DEFAULTS: dict[str, CLIInternalDefaults] = {
-    "gemini": CLIInternalDefaults(
-        parser="gemini_json",
-        additional_args=["-o", "json"],
-        default_role_prompt="systemprompts/clink/default.txt",
-        runner="gemini",
-    ),
     "codex": CLIInternalDefaults(
         parser="codex_jsonl",
         additional_args=["exec"],
@@ -45,11 +39,5 @@ INTERNAL_DEFAULTS: dict[str, CLIInternalDefaults] = {
         additional_args=["--print", "--output-format", "json"],
         default_role_prompt="systemprompts/clink/default.txt",
         runner="claude",
-    ),
-    "opencode": CLIInternalDefaults(
-        parser="opencode_json",
-        additional_args=["run", "--format", "json"],
-        default_role_prompt="systemprompts/clink/default.txt",
-        runner="opencode",
     ),
 }

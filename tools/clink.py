@@ -66,10 +66,7 @@ class CLinkTool(SimpleTool):
         self._cli_names = self._registry.list_clients()
         self._role_map: dict[str, list[str]] = {name: self._registry.list_roles(name) for name in self._cli_names}
         self._all_roles: list[str] = sorted({role for roles in self._role_map.values() for role in roles})
-        if "gemini" in self._cli_names:
-            self._default_cli_name = "gemini"
-        else:
-            self._default_cli_name = self._cli_names[0] if self._cli_names else None
+        self._default_cli_name = self._cli_names[0] if self._cli_names else None
         self._active_system_prompt: str = ""
         super().__init__()
 
@@ -78,7 +75,7 @@ class CLinkTool(SimpleTool):
 
     def get_description(self) -> str:
         return (
-            "Link a request to an external AI CLI (Gemini CLI, Qwen CLI, etc.) through AI CLI Bridge to reuse "
+            "Link a request to an external AI CLI (Claude CLI, Codex CLI, etc.) through AI CLI Bridge to reuse "
             "their capabilities inside existing workflows."
         )
 
@@ -196,6 +193,7 @@ class CLinkTool(SimpleTool):
             prompt_text = await self._prepare_prompt_for_role(
                 request,
                 role_config,
+                client_config,
                 system_prompt=system_prompt_text,
                 include_system_prompt=include_system_prompt,
             )
@@ -266,6 +264,7 @@ class CLinkTool(SimpleTool):
         return await self._prepare_prompt_for_role(
             request,
             role_config,
+            client_config,
             system_prompt=system_prompt_text,
             include_system_prompt=include_system_prompt,
         )
@@ -274,6 +273,7 @@ class CLinkTool(SimpleTool):
         self,
         request: CLinkRequest,
         role: ResolvedCLIRole,
+        client: ResolvedCLIClient,
         *,
         system_prompt: str,
         include_system_prompt: bool,
@@ -282,7 +282,7 @@ class CLinkTool(SimpleTool):
         self._active_system_prompt = system_prompt
         try:
             user_content = self.handle_prompt_file_with_fallback(request).strip()
-            guidance = self._agent_capabilities_guidance()
+            guidance = self._agent_capabilities_guidance(client)
             file_section = self._format_file_references(self.get_request_files(request))
 
             sections: list[str] = []
@@ -438,9 +438,9 @@ class CLinkTool(SimpleTool):
         error_output = ToolOutput(status="error", content=message, content_type="text", metadata=metadata)
         raise ToolExecutionError(error_output.model_dump_json())
 
-    def _agent_capabilities_guidance(self) -> str:
+    def _agent_capabilities_guidance(self, client: ResolvedCLIClient) -> str:
         return (
-            "You are operating through the Gemini CLI agent. You have access to your full suite of "
+            f"You are operating through the {client.name} CLI agent. You have access to your full suite of "
             "CLI capabilities—including launching web searches, reading files, and using any other "
             "available tools. Gather current information yourself and deliver the final answer without "
             "asking the AI CLI Bridge host to perform searches or file reads."

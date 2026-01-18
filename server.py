@@ -19,7 +19,6 @@ as defined by the MCP protocol.
 """
 
 import asyncio
-import atexit
 import logging
 import os
 import sys
@@ -50,8 +49,6 @@ from tools import (  # noqa: E402
     CLinkTool,
     VersionTool,
 )
-from tools.models import ToolOutput  # noqa: E402
-from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import get_env  # noqa: E402
 
 # Configure logging for server operations

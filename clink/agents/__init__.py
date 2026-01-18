@@ -7,10 +7,8 @@ from clink.models import ResolvedCLIClient
 from .base import AgentOutput, BaseCLIAgent, CLIAgentError
 from .claude import ClaudeAgent
 from .codex import CodexAgent
-from .gemini import GeminiAgent
 
 _AGENTS: dict[str, type[BaseCLIAgent]] = {
-    "gemini": GeminiAgent,
     "codex": CodexAgent,
     "claude": ClaudeAgent,
 }

@@ -8,7 +8,6 @@ Clink-only mode doesn't need AI provider configuration or model selection.
 import logging
 import os
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from mcp.types import TextContent
