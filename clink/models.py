@@ -49,6 +49,7 @@ class CLIClientConfig(BaseModel):
     additional_args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: PositiveInt | None = Field(default=None)
+    cpu_idle_timeout_seconds: int | None = None
     roles: dict[str, CLIRoleConfig] = Field(default_factory=dict)
     output_to_file: OutputCaptureConfig | None = None
 
@@ -83,6 +84,7 @@ class ResolvedCLIClient(BaseModel):
     config_args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: int
+    cpu_idle_timeout_seconds: int
     parser: str
     runner: str | None = None
     roles: dict[str, ResolvedCLIRole]

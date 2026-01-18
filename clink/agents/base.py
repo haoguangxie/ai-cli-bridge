@@ -15,7 +15,7 @@ from pathlib import Path
 
 import psutil
 
-from clink.constants import DEFAULT_IO_IDLE_TIMEOUT_SECONDS, DEFAULT_STREAM_LIMIT
+from clink.constants import DEFAULT_STREAM_LIMIT
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from clink.parsers import BaseParser, ParsedCLIResponse, ParserError, get_parser
 
@@ -131,7 +131,7 @@ class BaseCLIAgent:
             stdout_bytes, stderr_bytes = await self._communicate_with_activity_monitor(
                 process=process,
                 input_data=prompt.encode("utf-8"),
-                idle_timeout=DEFAULT_IO_IDLE_TIMEOUT_SECONDS,
+                idle_timeout=self.client.cpu_idle_timeout_seconds,
                 hard_timeout=self.client.timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
@@ -144,7 +144,7 @@ class BaseCLIAgent:
                     self.client.name,
                 )
             raise CLIAgentError(
-                f"CLI '{self.client.name}' timed out (no IO activity for {DEFAULT_IO_IDLE_TIMEOUT_SECONDS}s or exceeded {self.client.timeout_seconds}s total)",
+                f"CLI '{self.client.name}' timed out (no IO activity for {self.client.cpu_idle_timeout_seconds}s or exceeded {self.client.timeout_seconds}s total)",
                 returncode=None,
             ) from exc
 

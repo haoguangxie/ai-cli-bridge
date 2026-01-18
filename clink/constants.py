@@ -24,6 +24,7 @@ class CLIInternalDefaults:
     env: dict[str, str] = field(default_factory=dict)
     default_role_prompt: str | None = None
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    cpu_idle_timeout_seconds: int = DEFAULT_IO_IDLE_TIMEOUT_SECONDS
     runner: str | None = None
 
 
@@ -33,11 +34,13 @@ INTERNAL_DEFAULTS: dict[str, CLIInternalDefaults] = {
         additional_args=["exec"],
         default_role_prompt="systemprompts/clink/default.txt",
         runner="codex",
+        cpu_idle_timeout_seconds=DEFAULT_IO_IDLE_TIMEOUT_SECONDS,
     ),
     "claude": CLIInternalDefaults(
         parser="claude_json",
         additional_args=["--print", "--output-format", "json"],
         default_role_prompt="systemprompts/clink/default.txt",
         runner="claude",
+        cpu_idle_timeout_seconds=DEFAULT_IO_IDLE_TIMEOUT_SECONDS,
     ),
 }

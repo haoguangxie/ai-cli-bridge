@@ -10,6 +10,7 @@ from pathlib import Path
 
 from clink.constants import (
     CONFIG_DIR,
+    DEFAULT_IO_IDLE_TIMEOUT_SECONDS,
     DEFAULT_TIMEOUT_SECONDS,
     INTERNAL_DEFAULTS,
     PROJECT_ROOT,
@@ -143,6 +144,12 @@ class ClinkRegistry:
             internal_defaults.timeout_seconds if internal_defaults else DEFAULT_TIMEOUT_SECONDS
         )
 
+        cpu_idle_timeout_seconds = raw.cpu_idle_timeout_seconds or (
+            internal_defaults.cpu_idle_timeout_seconds
+            if internal_defaults
+            else DEFAULT_IO_IDLE_TIMEOUT_SECONDS
+        )
+
         parser_name = internal_defaults.parser
         if not parser_name:
             raise RegistryLoadError(
@@ -164,6 +171,7 @@ class ClinkRegistry:
             config_args=config_args,
             env=env,
             timeout_seconds=int(timeout_seconds),
+            cpu_idle_timeout_seconds=int(cpu_idle_timeout_seconds),
             parser=parser_name,
             runner=runner_name,
             roles=roles,
