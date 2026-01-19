@@ -25,6 +25,7 @@ logger = logging.getLogger("clink.agent")
 # If any process of a CLI type is active, all processes of that type are considered active
 _global_last_activity: dict[str, float] = {}
 _global_activity_lock = asyncio.Lock()
+CPU_ACTIVITY_THRESHOLD = 0.1  # seconds
 
 
 @dataclass
@@ -316,17 +317,19 @@ class BaseCLIAgent:
                     raise asyncio.TimeoutError(f"Hard timeout after {hard_timeout}s")
 
                 # Check CPU activity for THIS process
+                # Only consider it "active" if CPU time increased by more than threshold
+                # Small values (< 0.1s) are likely just event loop overhead, not real work
                 current_cpu_time = self._get_total_cpu_time(pid)
-                if current_cpu_time > last_cpu_time:
-                    # CPU activity detected, update GLOBAL activity tracker
-                    cpu_delta = current_cpu_time - last_cpu_time
+                cpu_delta = current_cpu_time - last_cpu_time
+                last_cpu_time = current_cpu_time
+                if cpu_delta >= CPU_ACTIVITY_THRESHOLD:
+                    # Significant CPU activity detected, update GLOBAL activity tracker
                     self._logger.debug(
                         "CLI '%s' CPU activity: +%.3fs (total elapsed: %.1fs)",
                         self.client.name,
                         cpu_delta,
                         elapsed,
                     )
-                    last_cpu_time = current_cpu_time
                     # Update global activity time for this CLI type
                     async with _global_activity_lock:
                         _global_last_activity[cli_name] = current_time
