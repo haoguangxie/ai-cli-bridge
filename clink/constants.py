@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_TIMEOUT_SECONDS = 1800  # Hard timeout as fallback
+DEFAULT_TIMEOUT_SECONDS = 3600  # Hard timeout as fallback (60 minutes)
 DEFAULT_IO_IDLE_TIMEOUT_SECONDS = 1200  # 20 minutes without CPU activity = stuck
 DEFAULT_STREAM_LIMIT = 10 * 1024 * 1024  # 10MB per stream
 
