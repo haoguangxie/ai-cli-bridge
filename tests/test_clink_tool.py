@@ -14,13 +14,13 @@ async def test_clink_tool_execute(monkeypatch):
 
     async def fake_run(**kwargs):
         return AgentOutput(
-            parsed=ParsedCLIResponse(content="Hello from Gemini", metadata={"model_used": "gemini-2.5-pro"}),
-            sanitized_command=["gemini", "-o", "json"],
+            parsed=ParsedCLIResponse(content="Hello from Claude", metadata={"model_used": "opus"}),
+            sanitized_command=["claude", "--print", "--output-format", "json"],
             returncode=0,
-            stdout='{"response": "Hello from Gemini"}',
+            stdout='{"response": "Hello from Claude"}',
             stderr="",
             duration_seconds=0.42,
-            parser_name="gemini_json",
+            parser_name="claude_json",
             output_file_content=None,
         )
 
@@ -35,7 +35,7 @@ async def test_clink_tool_execute(monkeypatch):
 
     arguments = {
         "prompt": "Summarize the project",
-        "cli_name": "gemini",
+        "cli_name": "claude",
         "role": "default",
         "absolute_file_paths": [],
         "images": [],
@@ -46,17 +46,17 @@ async def test_clink_tool_execute(monkeypatch):
 
     payload = json.loads(results[0].text)
     assert payload["status"] in {"success", "continuation_available"}
-    assert "Hello from Gemini" in payload["content"]
+    assert "Hello from Claude" in payload["content"]
     metadata = payload.get("metadata", {})
-    assert metadata.get("cli_name") == "gemini"
-    assert metadata.get("command") == ["gemini", "-o", "json"]
+    assert metadata.get("cli_name") == "claude"
+    assert metadata.get("command") == ["claude", "--print", "--output-format", "json"]
 
 
 def test_registry_lists_roles():
     registry = get_registry()
     clients = registry.list_clients()
-    assert {"codex", "gemini"}.issubset(set(clients))
-    roles = registry.list_roles("gemini")
+    assert {"codex", "claude"}.issubset(set(clients))
+    roles = registry.list_roles("claude")
     assert "default" in roles
     assert "default" in registry.list_roles("codex")
     codex_client = registry.get_client("codex")
@@ -76,12 +76,12 @@ async def test_clink_tool_defaults_to_first_cli(monkeypatch):
     async def fake_run(**kwargs):
         return AgentOutput(
             parsed=ParsedCLIResponse(content="Default CLI response", metadata={"events": ["foo"]}),
-            sanitized_command=["gemini"],
+            sanitized_command=["claude"],
             returncode=0,
             stdout='{"response": "Default CLI response"}',
             stderr="",
             duration_seconds=0.1,
-            parser_name="gemini_json",
+            parser_name="claude_json",
             output_file_content=None,
         )
 

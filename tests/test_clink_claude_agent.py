@@ -35,6 +35,7 @@ def claude_agent():
         config_args=["--permission-mode", "acceptEdits"],
         env={},
         timeout_seconds=30,
+        cpu_idle_timeout_seconds=60,
         parser="claude_json",
         runner="claude",
         roles={"default": role},

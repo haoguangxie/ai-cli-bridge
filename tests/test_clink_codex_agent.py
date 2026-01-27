@@ -31,6 +31,7 @@ def codex_agent():
         config_args=["--json", "--dangerously-bypass-approvals-and-sandbox"],
         env={},
         timeout_seconds=30,
+        cpu_idle_timeout_seconds=60,
         parser="codex_jsonl",
         roles={"default": role},
         output_to_file=None,
