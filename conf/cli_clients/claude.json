@@ -5,7 +5,9 @@
     "--permission-mode",
     "bypassPermissions",
     "--model",
-    "opus"
+    "opus",
+    "--disallowedTools",
+    "Task"
   ],
   "cpu_idle_timeout_seconds": 1200,
   "timeout_seconds": 14400,
