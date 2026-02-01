@@ -80,6 +80,7 @@ class BaseTool(ABC):
     def get_model_category(self) -> "ToolModelCategory":
         """Return the model category for this tool."""
         from tools.models import ToolModelCategory
+
         return ToolModelCategory.BALANCED
 
     @abstractmethod

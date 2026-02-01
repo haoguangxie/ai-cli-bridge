@@ -7,7 +7,9 @@ import logging
 import os
 import shlex
 import shutil
+import signal
 import tempfile
+import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -20,6 +22,115 @@ from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from clink.parsers import BaseParser, ParsedCLIResponse, ParserError, get_parser
 
 logger = logging.getLogger("clink.agent")
+
+# Global process registry for tracking active processes
+# Use threading.RLock (reentrant lock) to avoid deadlock if signal arrives while holding lock
+_active_processes: set[int] = set()
+_process_lock = threading.RLock()
+
+
+async def register_process(pid: int) -> None:
+    """Register an active process for cleanup tracking."""
+    with _process_lock:
+        _active_processes.add(pid)
+        logger.debug(f"Registered process {pid}, total active: {len(_active_processes)}")
+
+
+async def unregister_process(pid: int) -> None:
+    """Unregister a completed process."""
+    with _process_lock:
+        _active_processes.discard(pid)
+        logger.debug(f"Unregistered process {pid}, total active: {len(_active_processes)}")
+
+
+async def cleanup_all_processes() -> None:
+    """Clean up all active processes."""
+    # Copy the process list while holding the lock, then release it
+    with _process_lock:
+        if not _active_processes:
+            return
+        processes_to_cleanup = list(_active_processes)
+
+    logger.info(f"Cleaning up {len(processes_to_cleanup)} active CLI processes")
+
+    # Detect platform for process group handling
+    is_windows = os.name == "nt"
+
+    # First pass: graceful termination
+    for pid in processes_to_cleanup:
+        try:
+            if is_windows:
+                # Windows: terminate process and its children using psutil
+                try:
+                    parent = psutil.Process(pid)
+                    children = parent.children(recursive=True)
+                    logger.debug(f"Terminating process {pid} and {len(children)} children (Windows)")
+                    parent.terminate()
+                    for child in children:
+                        child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            else:
+                # POSIX: use process groups
+                logger.debug(f"Sending SIGTERM to process group {pid}")
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.error(f"Failed to terminate process {pid}: {e}")
+
+    # Wait for graceful shutdown
+    await asyncio.sleep(2)
+
+    # Second pass: force kill remaining processes
+    still_alive = []
+    for pid in processes_to_cleanup:
+        try:
+            if is_windows:
+                # Windows: check and force kill using psutil
+                try:
+                    parent = psutil.Process(pid)
+                    if parent.is_running():
+                        children = parent.children(recursive=True)
+                        logger.warning(f"Force killing process {pid} and {len(children)} children (Windows)")
+                        parent.kill()
+                        for child in children:
+                            child.kill()
+                        # Wait briefly and verify process is dead
+                        await asyncio.sleep(0.1)
+                        if psutil.pid_exists(pid):
+                            still_alive.append(pid)
+                except psutil.NoSuchProcess:
+                    pass
+            else:
+                # POSIX: check if still alive and force kill
+                os.kill(pid, 0)  # Check if still alive
+                logger.warning(f"Force killing process {pid}")
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                # Wait briefly and verify process is dead
+                await asyncio.sleep(0.1)
+                try:
+                    os.kill(pid, 0)  # Check if still alive after kill
+                    still_alive.append(pid)  # Still alive, add to list
+                except ProcessLookupError:
+                    pass  # Process is dead, don't add to still_alive
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.error(f"Failed to force kill process {pid}: {e}")
+            still_alive.append(pid)
+
+    # Clear the registry, but only remove processes that were successfully cleaned
+    with _process_lock:
+        for pid in processes_to_cleanup:
+            if pid not in still_alive:
+                _active_processes.discard(pid)
+
+    if still_alive:
+        logger.warning(f"Failed to clean up {len(still_alive)} processes: {still_alive}")
+
+    logger.info("CLI process cleanup completed")
+
 
 CPU_ACTIVITY_THRESHOLD = 0.1  # seconds - minimum CPU delta to consider as real activity
 STARTUP_TIMEOUT_SECONDS = 300.0  # seconds - max time to wait for first CPU activity after launch
@@ -113,38 +224,123 @@ class BaseCLIAgent:
             self._logger.debug("Working directory: %s", cwd)
 
         try:
+            # start_new_session is POSIX-only, not supported on Windows
+            subprocess_kwargs = {
+                "stdin": asyncio.subprocess.PIPE,
+                "stdout": asyncio.subprocess.PIPE,
+                "stderr": asyncio.subprocess.PIPE,
+                "cwd": cwd,
+                "limit": limit,
+                "env": env,
+            }
+            if os.name != "nt":
+                subprocess_kwargs["start_new_session"] = True  # Create new process group for easier cleanup
+
             process = await asyncio.create_subprocess_exec(
                 *command_with_output_flag,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                limit=limit,
-                env=env,
+                **subprocess_kwargs,
             )
         except FileNotFoundError as exc:
             raise CLIAgentError(f"Executable not found for CLI '{self.client.name}': {exc}") from exc
 
+        # Register the process for cleanup tracking
+        if process.pid:
+            await register_process(process.pid)
+
         try:
-            stdout_bytes, stderr_bytes = await self._communicate_with_activity_monitor(
-                process=process,
-                input_data=prompt.encode("utf-8"),
-                idle_timeout=self.client.cpu_idle_timeout_seconds,
-                hard_timeout=self.client.timeout_seconds,
-            )
-        except asyncio.TimeoutError as exc:
-            process.kill()
             try:
-                await asyncio.wait_for(process.communicate(), timeout=5.0)
-            except asyncio.TimeoutError:
-                self._logger.warning(
-                    "Process cleanup timed out after 5 seconds for CLI '%s'",
-                    self.client.name,
+                stdout_bytes, stderr_bytes = await self._communicate_with_activity_monitor(
+                    process=process,
+                    input_data=prompt.encode("utf-8"),
+                    idle_timeout=self.client.cpu_idle_timeout_seconds,
+                    hard_timeout=self.client.timeout_seconds,
                 )
-            raise CLIAgentError(
-                f"CLI '{self.client.name}' timed out (no IO activity for {self.client.cpu_idle_timeout_seconds}s or exceeded {self.client.timeout_seconds}s total)",
-                returncode=None,
-            ) from exc
+            except asyncio.TimeoutError as exc:
+                # Kill the entire process group, not just the main process
+                # This ensures all child processes are cleaned up
+                if process.pid:
+                    is_windows = os.name == "nt"
+                    try:
+                        if is_windows:
+                            # Windows: use psutil to terminate process tree
+                            try:
+                                parent = psutil.Process(process.pid)
+                                children = parent.children(recursive=True)
+                                self._logger.info(
+                                    "Terminating process %d and %d children for CLI '%s' (Windows)",
+                                    process.pid,
+                                    len(children),
+                                    self.client.name,
+                                )
+                                parent.terminate()
+                                for child in children:
+                                    child.terminate()
+                            except psutil.NoSuchProcess:
+                                self._logger.debug("Process already terminated for CLI '%s'", self.client.name)
+                        else:
+                            # POSIX: use process groups
+                            self._logger.info(
+                                "Sending SIGTERM to process group %d for CLI '%s'",
+                                process.pid,
+                                self.client.name,
+                            )
+                            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+
+                        # Wait 2 seconds for graceful shutdown
+                        await asyncio.sleep(2)
+
+                        # Check if process is still alive and force kill if needed
+                        try:
+                            if is_windows:
+                                parent = psutil.Process(process.pid)
+                                if parent.is_running():
+                                    children = parent.children(recursive=True)
+                                    self._logger.warning(
+                                        "Process %d did not terminate gracefully, force killing (Windows)",
+                                        process.pid,
+                                    )
+                                    parent.kill()
+                                    for child in children:
+                                        child.kill()
+                            else:
+                                os.kill(process.pid, 0)  # Check if process exists
+                                # Process still alive, force kill
+                                self._logger.warning(
+                                    "Process group %d did not terminate gracefully, sending SIGKILL",
+                                    process.pid,
+                                )
+                                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                        except (ProcessLookupError, psutil.NoSuchProcess):
+                            # Process already terminated
+                            self._logger.debug("Process %d terminated gracefully", process.pid)
+
+                    except (ProcessLookupError, psutil.NoSuchProcess):
+                        # Process group already gone
+                        self._logger.debug("Process already terminated for CLI '%s'", self.client.name)
+                    except Exception as e:
+                        self._logger.error(
+                            "Failed to kill process for CLI '%s': %s",
+                            self.client.name,
+                            e,
+                        )
+
+                # Wait for process cleanup to complete
+                try:
+                    await asyncio.wait_for(process.communicate(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    self._logger.error(
+                        "Process cleanup timed out after 5 seconds for CLI '%s'",
+                        self.client.name,
+                    )
+
+                raise CLIAgentError(
+                    f"CLI '{self.client.name}' timed out (no IO activity for {self.client.cpu_idle_timeout_seconds}s or exceeded {self.client.timeout_seconds}s total)",
+                    returncode=None,
+                ) from exc
+        finally:
+            # Always unregister the process when done
+            if process.pid:
+                await unregister_process(process.pid)
 
         duration = time.monotonic() - start_time
         return_code = process.returncode

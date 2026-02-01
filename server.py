@@ -21,6 +21,7 @@ as defined by the MCP protocol.
 import asyncio
 import logging
 import os
+import signal
 import sys
 import time
 from logging.handlers import RotatingFileHandler
@@ -131,6 +132,62 @@ except Exception as e:
     print(f"Warning: Could not set up file logging: {e}", file=sys.stderr)
 
 logger = logging.getLogger(__name__)
+
+
+# Signal handler for graceful shutdown
+_shutdown_requested = False
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def setup_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
+    """Set up signal handlers for graceful shutdown.
+
+    Args:
+        loop: The running event loop to schedule cleanup on
+    """
+    global _main_loop
+    _main_loop = loop
+
+    def signal_handler_sync(signum: int, frame: Any) -> None:
+        """Handle shutdown signals (synchronous version for signal.signal)."""
+        global _shutdown_requested
+        if _shutdown_requested:
+            logger.warning("Shutdown already in progress, ignoring signal")
+            return
+
+        _shutdown_requested = True
+        logger.info(f"Received signal {signum}, initiating shutdown...")
+
+        # Raise KeyboardInterrupt to trigger the cleanup path in run()
+        # This is safer than calling loop.stop() which causes RuntimeError
+        raise KeyboardInterrupt()
+
+    # Use platform-specific signal handling
+    if os.name != "nt":
+        # POSIX: Use loop.add_signal_handler (more efficient and safer)
+        def signal_handler_async() -> None:
+            """Handle shutdown signals (async version for loop.add_signal_handler)."""
+            global _shutdown_requested
+            if _shutdown_requested:
+                logger.warning("Shutdown already in progress, ignoring signal")
+                return
+
+            _shutdown_requested = True
+            logger.info("Received shutdown signal, initiating cleanup...")
+
+            # Raise KeyboardInterrupt to trigger the cleanup path in run()
+            # This is safer than calling loop.stop() which causes RuntimeError
+            raise KeyboardInterrupt()
+
+        # Register handlers using loop.add_signal_handler (POSIX only)
+        loop.add_signal_handler(signal.SIGTERM, signal_handler_async)
+        loop.add_signal_handler(signal.SIGINT, signal_handler_async)
+        logger.info("Signal handlers registered for SIGTERM and SIGINT (POSIX)")
+    else:
+        # Windows: Use signal.signal (loop.add_signal_handler not supported)
+        signal.signal(signal.SIGTERM, signal_handler_sync)
+        signal.signal(signal.SIGINT, signal_handler_sync)
+        logger.info("Signal handlers registered for SIGTERM and SIGINT (Windows)")
 
 
 # Create the MCP server instance with a unique name identifier
@@ -959,6 +1016,12 @@ async def main():
 
     Clink-only mode: No AI provider configuration or API keys required.
     """
+    # Get the current event loop
+    loop = asyncio.get_running_loop()
+
+    # Set up signal handlers for graceful shutdown
+    setup_signal_handlers(loop)
+
     # Log startup message
     logger.info("AI CLI Bridge starting up...")
     logger.info(f"Log level: {log_level}")
@@ -993,8 +1056,23 @@ def run():
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # Handle graceful shutdown
-        pass
+        # Handle graceful shutdown - clean up all child processes
+        logger.info("KeyboardInterrupt received, cleaning up processes...")
+        # Import here to avoid circular dependency
+        from clink.agents.base import cleanup_all_processes
+
+        # KeyboardInterrupt happens when the event loop is already stopped
+        # We need to create a new event loop for cleanup
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(cleanup_all_processes())
+        finally:
+            loop.close()
+        logger.info("Shutdown complete")
+    except Exception as e:
+        logger.error(f"Unexpected error during shutdown: {e}")
+        raise
 
 
 if __name__ == "__main__":

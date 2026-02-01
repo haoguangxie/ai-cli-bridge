@@ -145,9 +145,7 @@ class ClinkRegistry:
         )
 
         cpu_idle_timeout_seconds = raw.cpu_idle_timeout_seconds or (
-            internal_defaults.cpu_idle_timeout_seconds
-            if internal_defaults
-            else DEFAULT_IO_IDLE_TIMEOUT_SECONDS
+            internal_defaults.cpu_idle_timeout_seconds if internal_defaults else DEFAULT_IO_IDLE_TIMEOUT_SECONDS
         )
 
         parser_name = internal_defaults.parser
