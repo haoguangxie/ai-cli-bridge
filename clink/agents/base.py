@@ -132,7 +132,15 @@ async def cleanup_all_processes() -> None:
     logger.info("CLI process cleanup completed")
 
 
-CPU_ACTIVITY_THRESHOLD = 0.1  # seconds - minimum CPU delta to consider as real activity
+# CPU activity detection thresholds
+# Single-sample threshold: minimum CPU delta in one check to count as activity
+CPU_ACTIVITY_THRESHOLD = 0.5  # seconds - raised from 0.1 to filter heartbeat/event loop noise
+
+# Sliding window for cumulative activity detection
+# If cumulative CPU activity in the window exceeds the threshold, process is considered active
+CPU_ACTIVITY_WINDOW_SECONDS = 60.0  # seconds - sliding window size
+CPU_CUMULATIVE_THRESHOLD = 2.0  # seconds - minimum cumulative CPU in window to be "active"
+
 STARTUP_TIMEOUT_SECONDS = 300.0  # seconds - max time to wait for first CPU activity after launch
 
 
@@ -462,6 +470,9 @@ class BaseCLIAgent:
         **PER-PROCESS TRACKING**: Each process is tracked independently.
         This prevents one stuck process from keeping all processes "alive".
 
+        **DUAL DETECTION**: Uses both single-sample threshold AND sliding window
+        cumulative activity to distinguish real work from heartbeat/event loop noise.
+
         Args:
             process: The subprocess to communicate with
             input_data: Data to send to stdin
@@ -481,6 +492,10 @@ class BaseCLIAgent:
 
         # Startup timeout: process must show first CPU activity within configured time
         has_seen_cpu_activity = False
+
+        # Sliding window for cumulative activity detection
+        # Each entry is (timestamp, cpu_delta)
+        activity_window: list[tuple[float, float]] = []
 
         # Start the communicate task
         communicate_task = asyncio.create_task(process.communicate(input_data))
@@ -514,32 +529,64 @@ class BaseCLIAgent:
                     raise asyncio.TimeoutError(f"No CPU activity within {STARTUP_TIMEOUT_SECONDS}s of startup")
 
                 # Check CPU activity for THIS process ONLY
-                # Only consider it "active" if CPU time increased by more than threshold
-                # Small values (< 0.1s) are likely just event loop overhead, not real work
                 current_cpu_time = self._get_total_cpu_time(pid)
                 cpu_delta = current_cpu_time - last_cpu_time
+                # Clamp negative deltas to zero (can occur when subprocess exits or permission denied)
+                cpu_delta = max(cpu_delta, 0.0)
                 last_cpu_time = current_cpu_time
 
-                if cpu_delta >= CPU_ACTIVITY_THRESHOLD:
-                    # Significant CPU activity detected
+                # Add to sliding window
+                activity_window.append((current_time, cpu_delta))
+
+                # Remove entries outside the window
+                window_start = current_time - CPU_ACTIVITY_WINDOW_SECONDS
+                activity_window = [(t, d) for t, d in activity_window if t >= window_start]
+
+                # Calculate cumulative CPU activity in window
+                cumulative_cpu = sum(d for _, d in activity_window)
+
+                # Determine if process is truly active using DUAL detection:
+                # 1. Single large burst (>= CPU_ACTIVITY_THRESHOLD) indicates immediate activity
+                # 2. Cumulative activity in window (>= CPU_CUMULATIVE_THRESHOLD) indicates sustained work
+                is_active = cpu_delta >= CPU_ACTIVITY_THRESHOLD or cumulative_cpu >= CPU_CUMULATIVE_THRESHOLD
+
+                # For startup detection: any CPU activity (even minor) counts
+                # This uses a lower threshold than idle detection to avoid false startup timeouts
+                if cpu_delta > 0:
                     has_seen_cpu_activity = True
+
+                if is_active:
+                    # Only update last_activity_time when truly active (meets threshold)
+                    # This prevents heartbeat/event loop noise (0.1-0.2s) from keeping stuck processes alive
                     last_activity_time = current_time
                     self._logger.debug(
-                        "CLI '%s' (PID %d) CPU activity: +%.3fs (total elapsed: %.1fs)",
+                        "CLI '%s' (PID %d) CPU activity: delta=+%.3fs, window_cumulative=%.3fs (elapsed: %.1fs)",
                         self.client.name,
                         pid,
                         cpu_delta,
+                        cumulative_cpu,
                         elapsed,
+                    )
+                elif cpu_delta > 0:
+                    # Log small activity that doesn't meet threshold (for debugging)
+                    # NOTE: Does NOT update last_activity_time - minor CPU noise should not reset idle timeout
+                    self._logger.debug(
+                        "CLI '%s' (PID %d) minor CPU: delta=+%.3fs, window_cumulative=%.3fs (not counted as active)",
+                        self.client.name,
+                        pid,
+                        cpu_delta,
+                        cumulative_cpu,
                     )
 
                 # Check idle timeout using THIS PROCESS's activity only
                 idle_time = current_time - last_activity_time
                 if idle_time >= idle_timeout:
                     self._logger.warning(
-                        "CLI '%s' (PID %d) no CPU activity for %.1fs, considering stuck",
+                        "CLI '%s' (PID %d) no significant CPU activity for %.1fs (window_cumulative=%.3fs), considering stuck",
                         self.client.name,
                         pid,
                         idle_time,
+                        cumulative_cpu,
                     )
                     raise asyncio.TimeoutError(f"No CPU activity for {idle_timeout}s")
 
