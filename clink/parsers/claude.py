@@ -66,6 +66,19 @@ class ClaudeJSONParser(BaseParser):
         if message:
             return ParsedCLIResponse(content=message, metadata=metadata)
 
+        # Successful completion with empty result (e.g. Claude did all work via
+        # tool use and produced no final text).  Return a short notice instead
+        # of raising an error so the caller still gets metadata (cost, usage…).
+        is_success = (
+            payload.get("subtype") == "success"
+            and not payload.get("is_error")
+        )
+        if is_success:
+            return ParsedCLIResponse(
+                content="(Task completed successfully with no textual output.)",
+                metadata=metadata,
+            )
+
         stderr_text = stderr.strip()
         if stderr_text:
             metadata.setdefault("stderr", stderr_text)

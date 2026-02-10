@@ -47,6 +47,52 @@ def test_claude_parser_requires_output():
         parser.parse(stdout="", stderr="")
 
 
+def test_claude_parser_handles_empty_result_on_success():
+    """Regression: Claude CLI returns success with empty result when work was done via tool use."""
+    parser = ClaudeJSONParser()
+    stdout = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "duration_ms": 363284,
+            "duration_api_ms": 69820,
+            "num_turns": 7,
+            "result": "",
+            "stop_reason": None,
+            "session_id": "c289108c-8180-4fa5-832e-e35b5c4458a2",
+            "total_cost_usd": 0.57,
+            "usage": {"input_tokens": 31604, "output_tokens": 1332},
+            "modelUsage": {
+                "claude-opus-4-6": {"inputTokens": 31604, "outputTokens": 1332}
+            },
+        }
+    )
+
+    parsed = parser.parse(stdout=stdout, stderr="")
+
+    assert parsed.content  # should not be empty
+    assert "completed successfully" in parsed.content.lower()
+    assert parsed.metadata["is_error"] is False
+    assert parsed.metadata["session_id"] == "c289108c-8180-4fa5-832e-e35b5c4458a2"
+
+
+def test_claude_parser_still_errors_on_empty_result_with_error_flag():
+    """Empty result with is_error=true and no message should still raise."""
+    parser = ClaudeJSONParser()
+    stdout = json.dumps(
+        {
+            "type": "result",
+            "subtype": "error",
+            "is_error": True,
+            "result": "",
+        }
+    )
+
+    with pytest.raises(ParserError):
+        parser.parse(stdout=stdout, stderr="")
+
+
 def test_claude_parser_handles_array_payload_with_result_event():
     parser = ClaudeJSONParser()
     events = [
