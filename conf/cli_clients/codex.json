@@ -7,7 +7,7 @@
     "--enable",
     "web_search_request"
   ],
-  "cpu_idle_timeout_seconds": 1200,
+  "cpu_idle_timeout_seconds": 1800,
   "timeout_seconds": 14400,
   "env": {},
   "roles": {

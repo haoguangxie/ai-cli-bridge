@@ -1870,7 +1870,7 @@ PY
             echo "[mcp_servers.pal]"
             echo "command = \"bash\""
             echo "args = [\"-c\", \"for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge; done; echo 'uvx not found' >&2; exit 1\"]"
-            echo "tool_timeout_sec = 1200"
+            echo "tool_timeout_sec = 1800"
             echo ""
             echo "[mcp_servers.pal.env]"
             echo "PATH = \"/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin\""
@@ -1895,7 +1895,7 @@ cat <<'CODExEOF'
 [mcp_servers.pal]
 command = "sh"
 args = ["-c", "exec \$(which uvx 2>/dev/null || echo uvx) --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge"]
-tool_timeout_sec = 1200
+tool_timeout_sec = 1800
 
 [mcp_servers.pal.env]
 PATH = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin"

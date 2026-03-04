@@ -11,7 +11,7 @@ from clink.parsers.claude import ClaudeJSONParser
 def _build_success_payload() -> str:
     return (
         '{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,'
-        '"duration_api_ms":1200,"num_turns":1,"result":"42","session_id":"abc","total_cost_usd":0.12,'
+        '"duration_api_ms":1800,"num_turns":1,"result":"42","session_id":"abc","total_cost_usd":0.12,'
         '"usage":{"input_tokens":10,"output_tokens":5},'
         '"modelUsage":{"claude-sonnet-4-5-20250929":{"inputTokens":10,"outputTokens":5}}}'
     )
