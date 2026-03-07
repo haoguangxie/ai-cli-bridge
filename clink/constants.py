@@ -5,8 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-DEFAULT_TIMEOUT_SECONDS = 3600  # Hard timeout as fallback (60 minutes)
-DEFAULT_IO_IDLE_TIMEOUT_SECONDS = 1200  # 20 minutes without CPU activity = stuck
+DEFAULT_TIMEOUT_SECONDS = 1800  # Hard timeout as fallback (30 minutes)
+DEFAULT_IO_IDLE_TIMEOUT_SECONDS = 300  # 5 minutes without CPU activity = stuck
+# NOTE: Idle timeout reduced from 1200→300 after fixing per-child noise filtering
+# in base.py. Previously MCP server child process CPU noise prevented idle timeout
+# from ever firing, so 1200s was meaningless. Now that it works properly, 5 minutes
+# without ANY real CPU activity is a clear signal the process is stuck.
 DEFAULT_STREAM_LIMIT = 10 * 1024 * 1024  # 10MB per stream
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

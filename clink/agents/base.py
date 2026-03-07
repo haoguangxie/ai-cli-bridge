@@ -139,7 +139,16 @@ CPU_ACTIVITY_THRESHOLD = 0.5  # seconds - raised from 0.1 to filter heartbeat/ev
 # Sliding window for cumulative activity detection
 # If cumulative CPU activity in the window exceeds the threshold, process is considered active
 CPU_ACTIVITY_WINDOW_SECONDS = 60.0  # seconds - sliding window size
-CPU_CUMULATIVE_THRESHOLD = 2.0  # seconds - minimum cumulative CPU in window to be "active"
+CPU_CUMULATIVE_THRESHOLD = 15.0  # seconds - minimum cumulative CPU in window to be "active"
+# NOTE: Raised from 2.0 to 15.0 to filter out MCP server child process noise.
+# When codex runs, it spawns 8+ MCP server children whose collective background CPU
+# (~0.003s/check/child × 8 children × 60 checks = ~1.5s/window) was exceeding the old
+# threshold of 2.0s, preventing idle timeout from ever firing on stuck processes.
+
+# Per-child noise floor: children whose individual CPU delta is below this threshold
+# are excluded from the total CPU calculation. This filters out MCP server event loop
+# noise (~0.001-0.005s/check) while still counting tool execution children (>0.05s).
+CHILD_CPU_NOISE_FLOOR = 0.02  # seconds - per-child per-check minimum to count
 
 STARTUP_TIMEOUT_SECONDS = 300.0  # seconds - max time to wait for first CPU activity after launch
 
@@ -175,6 +184,9 @@ class BaseCLIAgent:
         self.client = client
         self._parser: BaseParser = get_parser(client.parser)
         self._logger = logging.getLogger(f"clink.runner.{client.name}")
+        # Per-child CPU tracking for noise filtering
+        # Maps child PID → last observed cumulative CPU time (user + system)
+        self._child_cpu_prev: dict[int, float] = {}
 
     async def run(
         self,
@@ -425,31 +437,60 @@ class BaseCLIAgent:
     # ------------------------------------------------------------------
 
     def _get_total_cpu_time(self, pid: int) -> float:
-        """Get total CPU time (user + system) for process and all children.
+        """Get total CPU time (user + system) for process and active children.
 
         Works on macOS/Linux/Windows unlike io_counters() which is Linux-only.
+
+        **Noise filtering**: Each child process is tracked individually. Only
+        children whose CPU delta since the last check exceeds CHILD_CPU_NOISE_FLOOR
+        are included in the total. This filters out MCP server event loop noise
+        (~0.001-0.005s/check) while correctly counting tool execution children
+        that do real work (>0.05s/check).
+
+        The main process (and its first direct child) are always fully counted
+        without noise filtering, as they represent the CLI itself.
         """
         total = 0.0
+        current_child_cpu: dict[int, float] = {}
+
         try:
             proc = psutil.Process(pid)
-            # Get CPU times for main process
+            # Main process: always counted (no noise filtering)
             try:
                 cpu = proc.cpu_times()
                 total += cpu.user + cpu.system
             except (psutil.AccessDenied, psutil.NoSuchProcess):
                 pass
-            # Get CPU times for all children (recursive)
+
+            # Children: apply per-child noise filtering
             try:
-                for child in proc.children(recursive=True):
+                children = proc.children(recursive=True)
+                for child in children:
                     try:
                         child_cpu = child.cpu_times()
-                        total += child_cpu.user + child_cpu.system
+                        child_total = child_cpu.user + child_cpu.system
+                        child_pid = child.pid
+                        current_child_cpu[child_pid] = child_total
+
+                        # Compute per-child delta since last check
+                        prev = self._child_cpu_prev.get(child_pid, 0.0)
+                        delta = child_total - prev
+
+                        if delta >= CHILD_CPU_NOISE_FLOOR:
+                            # This child did real work — count its full CPU
+                            total += child_total
+                        # else: noise-level CPU, skip this child's contribution
+
                     except (psutil.AccessDenied, psutil.NoSuchProcess):
                         pass
             except (psutil.AccessDenied, psutil.NoSuchProcess):
                 pass
         except psutil.NoSuchProcess:
             pass
+
+        # Update tracking for next check (also prunes dead children)
+        self._child_cpu_prev = current_child_cpu
+
         return total
 
     async def _communicate_with_activity_monitor(
@@ -487,6 +528,8 @@ class BaseCLIAgent:
         """
         pid = process.pid
         start_time = time.monotonic()
+        # Reset per-child CPU tracking for this new process
+        self._child_cpu_prev = {}
         last_cpu_time = self._get_total_cpu_time(pid)
         last_activity_time = start_time
 
