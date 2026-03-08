@@ -13,6 +13,18 @@ This repository is a clink bridge implementation. It does not implement local wo
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.10+
+- Node.js 20.19.5 (required for Codex CLI integration)
+
+If you use `nvm`:
+
+```bash
+nvm install
+nvm use
+```
+
 ### Installation
 
 ```bash

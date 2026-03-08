@@ -75,6 +75,54 @@ get_version() {
     grep -E '^__version__ = ' config.py 2>/dev/null | sed 's/__version__ = "\(.*\)"/\1/' || echo "unknown"
 }
 
+# Build a Codex MCP PATH that prefers Node 20 from NVM when available.
+get_codex_node20_bin() {
+    local node20_bin=""
+
+    if [[ -n "${NVM_BIN:-}" ]] && [[ -x "${NVM_BIN}/node" ]]; then
+        local nvm_major
+        nvm_major=$("${NVM_BIN}/node" -p "process.versions.node.split('.')[0]" 2>/dev/null || true)
+        if [[ "$nvm_major" == "20" ]]; then
+            node20_bin="$NVM_BIN"
+        fi
+    fi
+
+    if [[ -z "$node20_bin" ]] && [[ -x "$HOME/.nvm/versions/node/v20.19.5/bin/node" ]]; then
+        node20_bin="$HOME/.nvm/versions/node/v20.19.5/bin"
+    fi
+
+    if [[ -z "$node20_bin" ]]; then
+        local candidate
+        for candidate in "$HOME"/.nvm/versions/node/v20.*/bin/node; do
+            if [[ -x "$candidate" ]]; then
+                node20_bin="$(dirname "$candidate")"
+                break
+            fi
+        done
+    fi
+
+    if [[ -n "$node20_bin" ]]; then
+        echo "${node20_bin/#$HOME/\$HOME}"
+    fi
+}
+
+build_codex_env_path() {
+    local base_path="/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin"
+    local default_node20_path="\$HOME/.nvm/versions/node/v20.19.5/bin"
+    local node20_bin
+    node20_bin=$(get_codex_node20_bin)
+
+    if [[ -n "$node20_bin" ]]; then
+        if [[ "$node20_bin" == "$default_node20_path" ]]; then
+            echo "${node20_bin}:${base_path}"
+        else
+            echo "${node20_bin}:${default_node20_path}:${base_path}"
+        fi
+    else
+        echo "${default_node20_path}:${base_path}"
+    fi
+}
+
 # Clear Python cache files to prevent import issues
 clear_python_cache() {
     print_info "Clearing Python cache files..."
@@ -1790,6 +1838,8 @@ PY
         fi
 
         local env_vars=$(parse_env_variables)
+        local codex_env_path
+        codex_env_path=$(build_codex_env_path)
 
         {
             echo ""
@@ -1799,7 +1849,7 @@ PY
             echo "tool_timeout_sec = 1800"
             echo ""
             echo "[mcp_servers.pal.env]"
-            echo "PATH = \"/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin\""
+            echo "PATH = \"$codex_env_path\""
             if [[ -n "$env_vars" ]]; then
                 while IFS= read -r line; do
                     if [[ -n "$line" && "$line" =~ ^([^=]+)=(.*)$ ]]; then
@@ -1817,14 +1867,16 @@ PY
             print_error "Failed to update Codex CLI config"
             echo "Manual config location: $codex_config"
             echo "Add this configuration:"
-cat <<'CODExEOF'
+            local codex_env_path
+            codex_env_path=$(build_codex_env_path)
+cat <<CODExEOF
 [mcp_servers.pal]
 command = "sh"
 args = ["-c", "exec \$(which uvx 2>/dev/null || echo uvx) --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge"]
 tool_timeout_sec = 1800
 
 [mcp_servers.pal.env]
-PATH = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin"
+PATH = "$codex_env_path"
 
 [features]
 web_search_request = true
@@ -2369,13 +2421,15 @@ EOF
     print_info "For Codex CLI:"
     echo "   Add this configuration to ~/.codex/config.toml:"
     echo ""
+    local codex_env_path
+    codex_env_path=$(build_codex_env_path)
     cat << EOF
    [mcp_servers.pal]
    command = "bash"
    args = ["-c", "for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge; done; echo 'uvx not found' >&2; exit 1"]
 
    [mcp_servers.pal.env]
-   PATH = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin"
+   PATH = "$codex_env_path"
    DEFAULT_MODEL = "auto"
 EOF
     echo ""
