@@ -50,6 +50,14 @@ class CLinkRequest(BaseModel):
         default=None,
         description=COMMON_FIELD_DESCRIPTIONS["continuation_id"],
     )
+    extra_args: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Additional CLI arguments appended to the target CLI command "
+            "(e.g. ['--worktree', 'my-task']). Reserved args are automatically filtered, "
+            "and sensitive-looking values are redacted in logs/metadata."
+        ),
+    )
 
 
 class CLinkTool(SimpleTool):
@@ -140,6 +148,16 @@ class CLinkTool(SimpleTool):
             "absolute_file_paths": SchemaBuilder.SIMPLE_FIELD_SCHEMAS["absolute_file_paths"],
             "images": SchemaBuilder.COMMON_FIELD_SCHEMAS["images"],
             "continuation_id": SchemaBuilder.COMMON_FIELD_SCHEMAS["continuation_id"],
+            "extra_args": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Additional CLI arguments appended to the target CLI command. "
+                    "Use for runtime flags like ['--worktree', 'task-name']. "
+                    "Reserved args are filtered and sensitive-looking values are redacted in logs/metadata. "
+                    "These are appended after all configured args."
+                ),
+            },
         }
 
         schema = {
@@ -209,6 +227,7 @@ class CLinkTool(SimpleTool):
                 system_prompt=system_prompt_text if system_prompt_text.strip() else None,
                 files=absolute_file_paths,
                 images=images,
+                extra_args=request.extra_args,
             )
         except CLIAgentError as exc:
             metadata = self._build_error_metadata(client_config, exc)

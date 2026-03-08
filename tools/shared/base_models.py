@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 # Shared field descriptions to avoid duplication
 COMMON_FIELD_DESCRIPTIONS = {
-    "model": "Model to run. Supply a name if requested by the user or stay in auto mode. When in auto mode, use `listmodels` tool for model discovery.",
+    "model": (
+        "Model to run. Supply a name if requested by the user or stay in auto mode. "
+        "For configured CLI clients, check conf/cli_clients/."
+    ),
     "temperature": "0 = deterministic · 1 = creative.",
     "thinking_mode": "Reasoning depth: minimal, low, medium, high, or max.",
     "continuation_id": (

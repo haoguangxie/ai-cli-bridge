@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -14,6 +15,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 import psutil
 
@@ -180,6 +182,35 @@ class CLIAgentError(RuntimeError):
 class BaseCLIAgent:
     """Execute a configured CLI command and parse its output."""
 
+    DENIED_ARGS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "exec",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--enable",
+            "--print",
+            "--output-format",
+            "--append-system-prompt",
+            "--permission-mode",
+            "--model",
+            "--disallowedTools",
+        }
+    )
+    _DENIED_ARGS_WITH_VALUE: ClassVar[frozenset[str]] = frozenset(
+        {
+            "--enable",
+            "--output-format",
+            "--append-system-prompt",
+            "--permission-mode",
+            "--model",
+            "--disallowedTools",
+        }
+    )
+    _SENSITIVE_HINT_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
+        r"(?i)(token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|bearer|auth)"
+    )
+    _REDACTED_VALUE: ClassVar[str] = "[REDACTED]"
+
     def __init__(self, client: ResolvedCLIClient):
         self.client = client
         self._parser: BaseParser = get_parser(client.parser)
@@ -196,12 +227,13 @@ class BaseCLIAgent:
         system_prompt: str | None = None,
         files: Sequence[str],
         images: Sequence[str],
+        extra_args: Sequence[str] = (),
     ) -> AgentOutput:
         # Files and images are already embedded into the prompt by the tool; they are
         # accepted here only to keep parity with SimpleTool callers.
         _ = (files, images)
         # The runner simply executes the configured CLI command for the selected role.
-        command = self._build_command(role=role, system_prompt=system_prompt)
+        command = self._build_command(role=role, system_prompt=system_prompt, extra_args=extra_args)
         env = self._build_environment()
 
         # Resolve executable path for cross-platform compatibility (especially Windows)
@@ -214,7 +246,7 @@ class BaseCLIAgent:
             )
         command[0] = resolved_executable
 
-        sanitized_command = list(command)
+        sanitized_command = self._sanitize_args_for_logging(command)
 
         cwd = str(self.client.working_dir) if self.client.working_dir else None
         limit = DEFAULT_STREAM_LIMIT
@@ -237,7 +269,7 @@ class BaseCLIAgent:
             except KeyError as exc:  # pragma: no cover - defensive
                 raise CLIAgentError(f"Invalid output flag template '{flag_template}': missing placeholder {exc}")
             command_with_output_flag.extend(shlex.split(rendered_flag))
-            sanitized_command = list(command_with_output_flag)
+            sanitized_command = self._sanitize_args_for_logging(command_with_output_flag)
 
         self._logger.debug("Executing CLI command: %s", " ".join(sanitized_command))
         if cwd:
@@ -419,13 +451,93 @@ class BaseCLIAgent:
             output_file_content=output_file_content,
         )
 
-    def _build_command(self, *, role: ResolvedCLIRole, system_prompt: str | None) -> list[str]:
+    def _build_command(self, *, role: ResolvedCLIRole, system_prompt: str | None, extra_args: Sequence[str] = ()) -> list[str]:
         base = list(self.client.executable)
         base.extend(self.client.internal_args)
         base.extend(self.client.config_args)
         base.extend(role.role_args)
+        self._extend_with_safe_extra_args(base, extra_args)
 
         return base
+
+    def _extend_with_safe_extra_args(self, command: list[str], extra_args: Sequence[str]) -> None:
+        command.extend(self._filter_denied_extra_args(extra_args))
+
+    def _filter_denied_extra_args(self, extra_args: Sequence[str]) -> list[str]:
+        filtered: list[str] = []
+        removed: list[str] = []
+
+        index = 0
+        while index < len(extra_args):
+            arg = extra_args[index]
+            arg_name, has_inline_value = self._split_arg_name(arg)
+            is_flag = arg.startswith("-")
+            is_subcommand_position = index == 0 and not is_flag
+            should_check_denylist = is_flag or is_subcommand_position
+
+            if should_check_denylist and arg_name in self.DENIED_ARGS:
+                removed.append(arg)
+                if (
+                    arg_name in self._DENIED_ARGS_WITH_VALUE
+                    and not has_inline_value
+                    and index + 1 < len(extra_args)
+                    and not extra_args[index + 1].startswith("-")
+                ):
+                    removed.append(extra_args[index + 1])
+                    index += 2
+                    continue
+
+                index += 1
+                continue
+
+            filtered.append(arg)
+            index += 1
+
+        if removed:
+            removed_display = " ".join(self._sanitize_args_for_logging(removed))
+            self._logger.warning("Removed denied extra_args for CLI '%s': %s", self.client.name, removed_display)
+
+        return filtered
+
+    def _sanitize_args_for_logging(self, args: Sequence[str]) -> list[str]:
+        sanitized: list[str] = []
+        redact_next_value = False
+
+        for arg in args:
+            if redact_next_value:
+                sanitized.append(self._REDACTED_VALUE)
+                redact_next_value = False
+                continue
+
+            if arg.startswith("-") and "=" in arg:
+                arg_name, arg_value = arg.split("=", 1)
+                if self._looks_sensitive_text(arg_name) or self._looks_sensitive_text(arg_value):
+                    sanitized.append(f"{arg_name}={self._REDACTED_VALUE}")
+                else:
+                    sanitized.append(arg)
+                continue
+
+            if arg.startswith("-"):
+                sanitized.append(arg)
+                if self._looks_sensitive_text(arg):
+                    redact_next_value = True
+                continue
+
+            if self._looks_sensitive_text(arg):
+                sanitized.append(self._REDACTED_VALUE)
+            else:
+                sanitized.append(arg)
+
+        return sanitized
+
+    def _split_arg_name(self, arg: str) -> tuple[str, bool]:
+        if arg.startswith("-") and "=" in arg:
+            name, _ = arg.split("=", 1)
+            return name, True
+        return arg, False
+
+    def _looks_sensitive_text(self, value: str) -> bool:
+        return bool(value) and bool(self._SENSITIVE_HINT_PATTERN.search(value))
 
     def _build_environment(self) -> dict[str, str]:
         env = os.environ.copy()

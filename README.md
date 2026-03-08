@@ -1,52 +1,50 @@
-# ai-cli-bridge (Clink-Only Mode)
+# ai-cli-bridge
 
-> **Notice:** This is a minimal clink-only fork. For the full PAL MCP experience with all workflow tools, see the [main repository](https://github.com/BeehiveInnovations/pal-mcp-server).
+AI CLI Bridge is an MCP server focused on one job: bridging MCP requests to external AI CLI clients through `clink`.
 
-## What is This?
+## Available Tools
 
-AI CLI Bridge - A streamlined MCP server that provides **only the clink tool** - a bridge that forwards MCP requests to external AI CLI agents.
+1. `clink` - Forward prompts/files/images to a configured CLI client and return its response.
+2. `version` - Show server version/runtime metadata.
 
-### Available Tools
+## Positioning
 
-1. **`clink`** - Forward requests to configured AI CLIs (Gemini CLI, Qwen CLI, etc.)
-2. **`version`** - Display server version and system information
-
-## Why Clink-Only Mode?
-
-- **No API Keys Required** - Server starts without any AI provider configuration
-- **Minimal Dependencies** - No provider abstraction layers or model management
-- **CLI-to-CLI Bridge** - Leverage external CLI capabilities through MCP protocol
-- **Lightweight** - ~70% smaller codebase compared to full PAL MCP
+This repository is a clink bridge implementation. It does not implement local workflow tools in `server.py`; tool routing is limited to `clink` and `version`.
 
 ## Quick Start
 
 ### Installation
 
 ```bash
-# Clone this repository
 git clone https://github.com/your-fork/ai-cli-bridge.git
 cd ai-cli-bridge
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
 ### Configuration
 
-1. Configure your external CLI clients in `conf/cli_clients/` directory
-2. No API keys needed for the server itself
-3. External CLIs handle their own authentication
+1. Copy environment template:
+```bash
+cp .env.example .env
+```
+2. Configure CLI clients via JSON files in `conf/cli_clients/`.
+3. Ensure those external CLI clients are already installed and authenticated in your shell environment.
 
-### Running the Server
+### Run the Server
 
 ```bash
-# Start the MCP server
 python server.py
 ```
 
-### Using with Claude Desktop
+Or use setup helper:
 
-Add to your Claude Desktop configuration:
+```bash
+./run-server.sh
+```
+
+## Claude Desktop Integration
+
+Add to your Claude Desktop config:
 
 ```json
 {
@@ -61,98 +59,54 @@ Add to your Claude Desktop configuration:
 
 ## How Clink Works
 
-Clink acts as a bridge between MCP protocol and external CLI agents:
-
-```
-Claude Desktop → MCP Protocol → ai-cli-bridge (clink) → External CLI → AI Model
-                                                                ↓
-                                                           Response
+```text
+MCP Client -> ai-cli-bridge (clink) -> External CLI -> Model/Agent Runtime
 ```
 
-**Example Usage:**
+## CLI Client Configuration
 
-```bash
-# Forward to Gemini CLI
-Use clink with gemini to analyze this codebase architecture
+Built-in configs live in `conf/cli_clients/`.
 
-# Forward to Codex CLI with code review role
-Use clink with codex codereviewer to audit authentication module
+- `claude.json`
+- `codex.json`
 
-# Chain conversations across tools
-Use clink with gemini planner to create a refactoring plan
-Continue with clink codex to implement the changes
-```
+Each client config defines:
+- executable command and args
+- role-to-prompt mapping
+- timeout/env/runtime options
 
-## Configuration Files
-
-### CLI Client Configuration
-
-Edit `conf/cli_clients/` to configure your external CLIs:
-
-- `gemini.toml` - Gemini CLI configuration
-- `claude.toml` - Claude Code configuration
-- `codex.toml` - OpenAI Codex CLI configuration
-
-Each configuration specifies:
-- CLI executable path
-- Available roles (default, planner, codereviewer)
-- System prompts for each role
-
-## Project Structure
-
-```
-ai-cli-bridge/
-├── server.py              # Main MCP server (clink-only)
-├── config.py              # Minimal configuration
-├── tools/
-│   ├── clink.py          # Clink tool implementation
-│   ├── version.py        # Version tool
-│   ├── models.py         # Shared type definitions
-│   ├── shared/           # Base tool framework
-│   └── simple/           # Simple tool patterns
-├── clink/                # Clink agent implementation
-│   ├── agents/          # CLI agent runners
-│   ├── models.py        # Clink-specific models
-│   └── registry.py      # CLI client registry
-├── systemprompts/
-│   └── clink/           # Role-specific prompts
-└── conf/
-    └── cli_clients/     # CLI client configurations
-```
-
-## What's Missing (vs Full PAL MCP)
-
-This clink-only fork **does not include**:
-
-- ❌ Direct AI provider integration (OpenAI, Gemini, Anthropic, etc.)
-- ❌ Workflow tools (analyze, codereview, debug, planner, etc.)
-- ❌ Model selection and provider abstraction
-- ❌ Conversation continuation across local tools
-- ❌ Auto mode and model fallback logic
-
-**For these features**, use the [full PAL MCP Server](https://github.com/BeehiveInnovations/pal-mcp-server).
+Optional override: set `CLI_CLIENTS_CONFIG_PATH` in `.env` to use a custom config file or directory.
 
 ## Testing
 
-Minimal test suite for clink functionality:
-
 ```bash
-# Run clink-specific tests
-pytest tests/test_clink*.py -v
+# Unit tests
+python -m pytest tests/ -v -m "not integration"
+
+# Integration tests
+python -m pytest tests/ -v -m "integration"
 ```
 
-## Contributing
+## Project Structure
 
-This is a minimal fork. For feature development, please contribute to the [main PAL MCP repository](https://github.com/BeehiveInnovations/pal-mcp-server).
-
-Bug fixes specific to clink-only mode are welcome via pull requests.
+```text
+ai-cli-bridge/
+├── server.py
+├── config.py
+├── tools/
+│   ├── clink.py
+│   └── version.py
+├── clink/
+│   ├── agents/
+│   ├── parsers/
+│   └── registry.py
+├── conf/
+│   └── cli_clients/
+├── systemprompts/
+│   └── clink/
+└── tests/
+```
 
 ## License
 
-Same as the main PAL MCP Server project.
-
-## Credits
-
-This clink-only mode is derived from [PAL MCP Server](https://github.com/BeehiveInnovations/pal-mcp-server).
-
-Original authors and contributors deserve all credit for the architecture and clink implementation.
+Same as the upstream PAL MCP project license.

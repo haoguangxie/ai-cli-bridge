@@ -196,6 +196,7 @@ class VersionTool(BaseTool):
 
         model_selection_metadata = {"mode": "unknown", "default_model": None}
         model_selection_display = "Model selection status unavailable"
+        configured_cli_clients_count: Optional[int] = None
 
         # Model selection configuration
         try:
@@ -205,10 +206,11 @@ class VersionTool(BaseTool):
             auto_mode = BaseTool.is_effective_auto_mode(self)
             if auto_mode:
                 output_lines.append(
-                    "**Model Selection**: Auto model selection mode (call `listmodels` to inspect options)"
+                    "**Model Selection**: Auto model selection mode "
+                    "(check `conf/cli_clients/` for configured CLI clients)"
                 )
                 model_selection_metadata = {"mode": "auto", "default_model": DEFAULT_MODEL}
-                model_selection_display = "Auto model selection (use `listmodels` for options)"
+                model_selection_display = "Auto model selection (see `conf/cli_clients/` for configured CLI clients)"
             else:
                 output_lines.append(f"**Model Selection**: Default model set to `{DEFAULT_MODEL}`")
                 model_selection_metadata = {"mode": "default", "default_model": DEFAULT_MODEL}
@@ -220,7 +222,7 @@ class VersionTool(BaseTool):
         output_lines.append("## Quick Summary — relay everything below")
         output_lines.append(f"- Version `{__version__}` (updated {__updated__})")
         output_lines.append(f"- {model_selection_display}")
-        output_lines.append("- Run `listmodels` for the complete model catalog and capabilities")
+        output_lines.append("- Check `conf/cli_clients/` to review configured CLI clients")
         output_lines.append("")
 
         # Try to get client information
@@ -243,10 +245,10 @@ class VersionTool(BaseTool):
         output_lines.append("")
         output_lines.append("## Agent Reporting Guidance")
         output_lines.append(
-            "Agents MUST report: version, model-selection status, configured CLI clients, and available-model count."
+            "Agents MUST report: version, model-selection status, configured CLI clients, and configured CLI clients count."
         )
         output_lines.append("Repeat the quick-summary bullets verbatim in your reply.")
-        output_lines.append("Reference `listmodels` when users ask about model availability or capabilities.")
+        output_lines.append("Reference `conf/cli_clients/` when users ask about configured CLI availability.")
         output_lines.append("")
 
         # Check for updates from GitHub
@@ -316,25 +318,23 @@ class VersionTool(BaseTool):
             except RegistryLoadError:
                 cli_names = []
 
+            configured_cli_clients_count = len(cli_names)
             if cli_names:
-                output_lines.append("**Configured CLI Clients**:")
+                output_lines.append(f"**Configured CLI Clients**: {configured_cli_clients_count}")
                 for cli_name in cli_names:
                     output_lines.append(f"- **{cli_name}**: ✅ Configured")
             else:
-                output_lines.append("**Configured CLI Clients**: None configured")
+                output_lines.append("**Configured CLI Clients**: 0 (none configured)")
 
         except Exception as e:
             logger.warning(f"Error checking CLI configuration: {e}")
             output_lines.append("**Configured CLI Clients**: Error checking configuration")
+            configured_cli_clients_count = None
 
-        # Get total available models from local metadata
-        try:
-            from utils.model_context import get_available_model_names
-
-            available_models = get_available_model_names()
-            output_lines.append(f"\n\n**Available Models (local metadata)**: {len(available_models)}")
-        except Exception:
-            output_lines.append("\n\n**Available Models (local metadata)**: Unknown")
+        if configured_cli_clients_count is None:
+            output_lines.append("\n\n**Configured CLI Clients Count**: Unknown")
+        else:
+            output_lines.append(f"\n\n**Configured CLI Clients Count**: {configured_cli_clients_count}")
 
         output_lines.append("")
 

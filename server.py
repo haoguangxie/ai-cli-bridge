@@ -1,21 +1,9 @@
 """
-AI CLI Bridge - Main server implementation
+AI CLI Bridge MCP server.
 
-This module implements the core MCP (Model Context Protocol) server that provides
-a bridge to external AI CLI tools for code analysis, review, and assistance.
-
-The server follows the MCP specification to expose various AI tools as callable functions
-that can be used by MCP clients (like Claude). Each tool provides specialized functionality
-such as code review, debugging, deep thinking, and general chat capabilities.
-
-Key Components:
-- MCP Server: Handles protocol communication and tool discovery
-- Tool Registry: Maps tool names to their implementations
-- Request Handler: Processes incoming tool calls and returns formatted responses
-- Configuration: Manages API keys and model settings
-
-The server runs on stdio (standard input/output) and communicates using JSON-RPC messages
-as defined by the MCP protocol.
+This server exposes only two tools:
+- clink: forward requests to configured external AI CLIs
+- version: show server/system version info
 """
 
 import asyncio
@@ -26,16 +14,12 @@ import sys
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from mcp.server import Server  # noqa: E402
 from mcp.server.models import InitializationOptions  # noqa: E402
 from mcp.server.stdio import stdio_server  # noqa: E402
 from mcp.types import (  # noqa: E402
-    GetPromptResult,
-    Prompt,
-    PromptMessage,
-    PromptsCapability,
     ServerCapabilities,
     TextContent,
     Tool,
@@ -43,292 +27,118 @@ from mcp.types import (  # noqa: E402
     ToolsCapability,
 )
 
-from config import (  # noqa: E402
-    __version__,
-)
-from tools import (  # noqa: E402
-    CLinkTool,
-    VersionTool,
-)
+from config import __version__  # noqa: E402
+from tools import CLinkTool, VersionTool  # noqa: E402
 from utils.env import get_env  # noqa: E402
 
-# Configure logging for server operations
-# Can be controlled via LOG_LEVEL environment variable (DEBUG, INFO, WARNING, ERROR)
 log_level = (get_env("LOG_LEVEL", "DEBUG") or "DEBUG").upper()
-
-# Create timezone-aware formatter
 
 
 class LocalTimeFormatter(logging.Formatter):
-    def formatTime(self, record, datefmt=None):
-        """Override to use local timezone instead of UTC"""
+    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+        """Use local timezone in log timestamps."""
         ct = self.converter(record.created)
         if datefmt:
-            s = time.strftime(datefmt, ct)
-        else:
-            t = time.strftime("%Y-%m-%d %H:%M:%S", ct)
-            s = f"{t},{record.msecs:03.0f}"
-        return s
+            return time.strftime(datefmt, ct)
+        t = time.strftime("%Y-%m-%d %H:%M:%S", ct)
+        return f"{t},{record.msecs:03.0f}"
 
 
-# Configure both console and file logging
-log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+def configure_logging() -> None:
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-# Clear any existing handlers first
-root_logger = logging.getLogger()
-root_logger.handlers.clear()
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(getattr(logging, log_level, logging.INFO))
 
-# Create and configure stderr handler explicitly
-stderr_handler = logging.StreamHandler(sys.stderr)
-stderr_handler.setLevel(getattr(logging, log_level, logging.INFO))
-stderr_handler.setFormatter(LocalTimeFormatter(log_format))
-root_logger.addHandler(stderr_handler)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(getattr(logging, log_level, logging.INFO))
+    stderr_handler.setFormatter(LocalTimeFormatter(log_format))
+    root_logger.addHandler(stderr_handler)
 
-# Note: MCP stdio_server interferes with stderr during tool execution
-# All logs are properly written to logs/mcp_server.log for monitoring
+    try:
+        log_dir = Path(__file__).parent / "logs"
+        log_dir.mkdir(exist_ok=True)
 
-# Set root logger level
-root_logger.setLevel(getattr(logging, log_level, logging.INFO))
+        file_handler = RotatingFileHandler(
+            log_dir / "mcp_server.log",
+            maxBytes=20 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(getattr(logging, log_level, logging.INFO))
+        file_handler.setFormatter(LocalTimeFormatter(log_format))
+        root_logger.addHandler(file_handler)
 
-# Add rotating file handler for local log monitoring
+        mcp_logger = logging.getLogger("mcp_activity")
+        mcp_file_handler = RotatingFileHandler(
+            log_dir / "mcp_activity.log",
+            maxBytes=10 * 1024 * 1024,
+            backupCount=2,
+            encoding="utf-8",
+        )
+        mcp_file_handler.setLevel(logging.INFO)
+        mcp_file_handler.setFormatter(LocalTimeFormatter("%(asctime)s - %(message)s"))
+        mcp_logger.addHandler(mcp_file_handler)
+        mcp_logger.setLevel(logging.INFO)
+        mcp_logger.propagate = True
 
-try:
-    # Create logs directory in project root
-    log_dir = Path(__file__).parent / "logs"
-    log_dir.mkdir(exist_ok=True)
+        logging.info(f"Logging to: {log_dir / 'mcp_server.log'}")
+        logging.info(f"Process PID: {os.getpid()}")
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        print(f"Warning: Could not set up file logging: {exc}", file=sys.stderr)
 
-    # Main server log with size-based rotation (20MB max per file)
-    # This ensures logs don't grow indefinitely and are properly managed
-    file_handler = RotatingFileHandler(
-        log_dir / "mcp_server.log",
-        maxBytes=20 * 1024 * 1024,  # 20MB max file size
-        backupCount=5,  # Keep 10 rotated files (100MB total)
-        encoding="utf-8",
-    )
-    file_handler.setLevel(getattr(logging, log_level, logging.INFO))
-    file_handler.setFormatter(LocalTimeFormatter(log_format))
-    logging.getLogger().addHandler(file_handler)
 
-    # Create a special logger for MCP activity tracking with size-based rotation
-    mcp_logger = logging.getLogger("mcp_activity")
-    mcp_file_handler = RotatingFileHandler(
-        log_dir / "mcp_activity.log",
-        maxBytes=10 * 1024 * 1024,  # 20MB max file size
-        backupCount=2,  # Keep 5 rotated files (20MB total)
-        encoding="utf-8",
-    )
-    mcp_file_handler.setLevel(logging.INFO)
-    mcp_file_handler.setFormatter(LocalTimeFormatter("%(asctime)s - %(message)s"))
-    mcp_logger.addHandler(mcp_file_handler)
-    mcp_logger.setLevel(logging.INFO)
-    # Ensure MCP activity also goes to stderr
-    mcp_logger.propagate = True
-
-    # Log setup info directly to root logger since logger isn't defined yet
-    logging.info(f"Logging to: {log_dir / 'mcp_server.log'}")
-    logging.info(f"Process PID: {os.getpid()}")
-
-except Exception as e:
-    print(f"Warning: Could not set up file logging: {e}", file=sys.stderr)
-
+configure_logging()
 logger = logging.getLogger(__name__)
 
+server: Server = Server("ai-cli-bridge")
 
-# Signal handler for graceful shutdown
 _shutdown_requested = False
-_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+TOOLS = {
+    "clink": CLinkTool(),
+    "version": VersionTool(),
+}
 
 
 def setup_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
-    """Set up signal handlers for graceful shutdown.
+    """Install SIGTERM/SIGINT handlers for graceful shutdown."""
 
-    Args:
-        loop: The running event loop to schedule cleanup on
-    """
-    global _main_loop
-    _main_loop = loop
+    def signal_handler_sync(signum: int, frame: Any) -> None:  # noqa: ARG001
+        nonlocal_loop_msg = f"Received signal {signum}, initiating shutdown..."
+        _request_shutdown(nonlocal_loop_msg)
 
-    def signal_handler_sync(signum: int, frame: Any) -> None:
-        """Handle shutdown signals (synchronous version for signal.signal)."""
-        global _shutdown_requested
-        if _shutdown_requested:
-            logger.warning("Shutdown already in progress, ignoring signal")
-            return
+    def signal_handler_async() -> None:
+        _request_shutdown("Received shutdown signal, initiating cleanup...")
 
-        _shutdown_requested = True
-        logger.info(f"Received signal {signum}, initiating shutdown...")
-
-        # Raise KeyboardInterrupt to trigger the cleanup path in run()
-        # This is safer than calling loop.stop() which causes RuntimeError
-        raise KeyboardInterrupt()
-
-    # Use platform-specific signal handling
     if os.name != "nt":
-        # POSIX: Use loop.add_signal_handler (more efficient and safer)
-        def signal_handler_async() -> None:
-            """Handle shutdown signals (async version for loop.add_signal_handler)."""
-            global _shutdown_requested
-            if _shutdown_requested:
-                logger.warning("Shutdown already in progress, ignoring signal")
-                return
-
-            _shutdown_requested = True
-            logger.info("Received shutdown signal, initiating cleanup...")
-
-            # Raise KeyboardInterrupt to trigger the cleanup path in run()
-            # This is safer than calling loop.stop() which causes RuntimeError
-            raise KeyboardInterrupt()
-
-        # Register handlers using loop.add_signal_handler (POSIX only)
         loop.add_signal_handler(signal.SIGTERM, signal_handler_async)
         loop.add_signal_handler(signal.SIGINT, signal_handler_async)
         logger.info("Signal handlers registered for SIGTERM and SIGINT (POSIX)")
     else:
-        # Windows: Use signal.signal (loop.add_signal_handler not supported)
         signal.signal(signal.SIGTERM, signal_handler_sync)
         signal.signal(signal.SIGINT, signal_handler_sync)
         logger.info("Signal handlers registered for SIGTERM and SIGINT (Windows)")
 
 
-# Create the MCP server instance with a unique name identifier
-# This name is used by MCP clients to identify and connect to this specific server
-server: Server = Server("ai-cli-bridge")
-
-
-# Constants for tool filtering
-ESSENTIAL_TOOLS = {"version", "listmodels"}
-
-
-def parse_disabled_tools_env() -> set[str]:
-    """
-    Parse the DISABLED_TOOLS environment variable into a set of tool names.
-
-    Returns:
-        Set of lowercase tool names to disable, empty set if none specified
-    """
-    disabled_tools_env = (get_env("DISABLED_TOOLS", "") or "").strip()
-    if not disabled_tools_env:
-        return set()
-    return {t.strip().lower() for t in disabled_tools_env.split(",") if t.strip()}
-
-
-def validate_disabled_tools(disabled_tools: set[str], all_tools: dict[str, Any]) -> None:
-    """
-    Validate the disabled tools list and log appropriate warnings.
-
-    Args:
-        disabled_tools: Set of tool names requested to be disabled
-        all_tools: Dictionary of all available tool instances
-    """
-    essential_disabled = disabled_tools & ESSENTIAL_TOOLS
-    if essential_disabled:
-        logger.warning(f"Cannot disable essential tools: {sorted(essential_disabled)}")
-    unknown_tools = disabled_tools - set(all_tools.keys())
-    if unknown_tools:
-        logger.warning(f"Unknown tools in DISABLED_TOOLS: {sorted(unknown_tools)}")
-
-
-def apply_tool_filter(all_tools: dict[str, Any], disabled_tools: set[str]) -> dict[str, Any]:
-    """
-    Apply the disabled tools filter to create the final tools dictionary.
-
-    Args:
-        all_tools: Dictionary of all available tool instances
-        disabled_tools: Set of tool names to disable
-
-    Returns:
-        Dictionary containing only enabled tools
-    """
-    enabled_tools = {}
-    for tool_name, tool_instance in all_tools.items():
-        if tool_name in ESSENTIAL_TOOLS or tool_name not in disabled_tools:
-            enabled_tools[tool_name] = tool_instance
-        else:
-            logger.debug(f"Tool '{tool_name}' disabled via DISABLED_TOOLS")
-    return enabled_tools
-
-
-def log_tool_configuration(disabled_tools: set[str], enabled_tools: dict[str, Any]) -> None:
-    """
-    Log the final tool configuration for visibility.
-
-    Args:
-        disabled_tools: Set of tool names that were requested to be disabled
-        enabled_tools: Dictionary of tools that remain enabled
-    """
-    if not disabled_tools:
-        logger.info("All tools enabled (DISABLED_TOOLS not set)")
+def _request_shutdown(message: str) -> None:
+    global _shutdown_requested
+    if _shutdown_requested:
+        logger.warning("Shutdown already in progress, ignoring signal")
         return
-    actual_disabled = disabled_tools - ESSENTIAL_TOOLS
-    if actual_disabled:
-        logger.debug(f"Disabled tools: {sorted(actual_disabled)}")
-        logger.info(f"Active tools: {sorted(enabled_tools.keys())}")
 
-
-def filter_disabled_tools(all_tools: dict[str, Any]) -> dict[str, Any]:
-    """
-    Filter tools based on DISABLED_TOOLS environment variable.
-
-    Args:
-        all_tools: Dictionary of all available tool instances
-
-    Returns:
-        dict: Filtered dictionary containing only enabled tools
-    """
-    disabled_tools = parse_disabled_tools_env()
-    if not disabled_tools:
-        log_tool_configuration(disabled_tools, all_tools)
-        return all_tools
-    validate_disabled_tools(disabled_tools, all_tools)
-    enabled_tools = apply_tool_filter(all_tools, disabled_tools)
-    log_tool_configuration(disabled_tools, enabled_tools)
-    return enabled_tools
-
-
-# Initialize the tool registry with clink-only tools
-# Clink-only mode: Only CLinkTool and VersionTool are available
-# No AI provider dependencies required
-TOOLS = {
-    "clink": CLinkTool(),  # Bridge requests to configured AI CLIs
-    "version": VersionTool(),  # Display server version and system information
-}
-
-# Rich prompt templates for clink-only tools
-PROMPT_TEMPLATES = {
-    "clink": {
-        "name": "clink",
-        "description": "Forward a request to a configured AI CLI (e.g., Gemini)",
-        "template": "Use clink with cli_name=<cli> to run this prompt",
-    },
-    "version": {
-        "name": "version",
-        "description": "Show server version and system information",
-        "template": "Show AI CLI Bridge version",
-    },
-}
-
-
-# Clink-only mode: No provider configuration needed
-# CLinkTool forwards requests to external AI CLIs without requiring API keys
+    _shutdown_requested = True
+    logger.info(message)
+    raise KeyboardInterrupt
 
 
 @server.list_tools()
 async def handle_list_tools() -> list[Tool]:
-    """
-    List all available tools with their descriptions and input schemas.
-
-    This handler is called by MCP clients during initialization to discover
-    what tools are available. Each tool provides:
-    - name: Unique identifier for the tool
-    - description: Detailed explanation of what the tool does
-    - inputSchema: JSON Schema defining the expected parameters
-
-    Returns:
-        List of Tool objects representing all available tools
-    """
+    """Return MCP tool metadata for clink and version."""
     logger.debug("MCP client requested tool list")
 
-    # Try to log client info if available (this happens early in the handshake)
+    # Best-effort MCP client logging during handshake.
     try:
         from utils.client_info import format_client_info, get_client_info_from_context
 
@@ -336,8 +146,6 @@ async def handle_list_tools() -> list[Tool]:
         if client_info:
             formatted = format_client_info(client_info)
             logger.info(f"MCP Client Connected: {formatted}")
-
-            # Log to activity file as well
             try:
                 mcp_activity_logger = logging.getLogger("mcp_activity")
                 friendly_name = client_info.get("friendly_name", "CLI Agent")
@@ -346,16 +154,13 @@ async def handle_list_tools() -> list[Tool]:
                 mcp_activity_logger.info(f"MCP_CLIENT_INFO: {friendly_name} (raw={raw_name} v{version})")
             except Exception:
                 pass
-    except Exception as e:
-        logger.debug(f"Could not log client info during list_tools: {e}")
-    tools = []
+    except Exception as exc:
+        logger.debug(f"Could not log client info during list_tools: {exc}")
 
-    # Add all registered AI-powered tools from the TOOLS registry
+    tools: list[Tool] = []
     for tool in TOOLS.values():
-        # Get optional annotations from the tool
         annotations = tool.get_annotations()
         tool_annotations = ToolAnnotations(**annotations) if annotations else None
-
         tools.append(
             Tool(
                 name=tool.name,
@@ -365,676 +170,49 @@ async def handle_list_tools() -> list[Tool]:
             )
         )
 
-    # Log cache efficiency info
-    openrouter_key_for_cache = get_env("OPENROUTER_API_KEY")
-    if openrouter_key_for_cache and openrouter_key_for_cache != "your_openrouter_api_key_here":
-        logger.debug("OpenRouter registry cache used efficiently across all tool schemas")
-
     logger.debug(f"Returning {len(tools)} tools to MCP client")
     return tools
 
 
 @server.call_tool()
-async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    """
-    Handle incoming tool execution requests from MCP clients.
-
-    This is the main request dispatcher that routes tool calls to their appropriate handlers.
-    It supports both AI-powered tools (from TOOLS registry) and utility tools (implemented as
-    static functions).
-
-    CONVERSATION LIFECYCLE MANAGEMENT:
-    This function serves as the central orchestrator for multi-turn AI-to-AI conversations:
-
-    1. THREAD RESUMPTION: When continuation_id is present, it reconstructs complete conversation
-       context from in-memory storage including conversation history and file references
-
-    2. CROSS-TOOL CONTINUATION: Enables seamless handoffs between different tools (analyze →
-       codereview → debug) while preserving full conversation context and file references
-
-    3. CONTEXT INJECTION: Reconstructed conversation history is embedded into tool prompts
-       using the dual prioritization strategy:
-       - Files: Newest-first prioritization (recent file versions take precedence)
-       - Turns: Newest-first collection for token efficiency, chronological presentation for LLM
-
-    4. FOLLOW-UP GENERATION: After tool execution, generates continuation offers for ongoing
-       AI-to-AI collaboration with natural language instructions
-
-    STATELESS TO STATEFUL BRIDGE:
-    The MCP protocol is inherently stateless, but this function bridges the gap by:
-    - Loading persistent conversation state from in-memory storage
-    - Reconstructing full multi-turn context for tool execution
-    - Enabling tools to access previous exchanges and file references
-    - Supporting conversation chains across different tool types
-
-    Args:
-        name: The name of the tool to execute (e.g., "analyze", "chat", "codereview")
-        arguments: Dictionary of arguments to pass to the tool, potentially including:
-                  - continuation_id: UUID for conversation thread resumption
-                  - files: File paths for analysis (subject to deduplication)
-                  - prompt: User request or follow-up question
-                  - model: Specific AI model to use (optional)
-
-    Returns:
-        List of TextContent objects containing:
-        - Tool's primary response with analysis/results
-        - Continuation offers for follow-up conversations (when applicable)
-        - Structured JSON responses with status and content
-
-    Raises:
-        ValueError: If continuation_id is invalid or conversation thread not found
-        Exception: For tool-specific errors or execution failures
-
-    Example Conversation Flow:
-        1. The CLI calls analyze tool with files → creates new thread
-        2. Thread ID returned in continuation offer
-        3. The CLI continues with codereview tool + continuation_id → full context preserved
-        4. Multiple tools can collaborate using same thread ID
-    """
+async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
+    """Route tool requests to clink/version handlers."""
+    args = arguments or {}
     logger.info(f"MCP tool call: {name}")
-    logger.debug(f"MCP tool arguments: {list(arguments.keys())}")
+    logger.debug(f"MCP tool arguments: {list(args.keys())}")
 
-    # Log to activity file for monitoring
     try:
         mcp_activity_logger = logging.getLogger("mcp_activity")
-        mcp_activity_logger.info(f"TOOL_CALL: {name} with {len(arguments)} arguments")
+        mcp_activity_logger.info(f"TOOL_CALL: {name} with {len(args)} arguments")
     except Exception:
         pass
 
-    # Clink-only mode: No conversation continuation support needed
-    # Route to clink-only tools (no model validation needed)
-    if name in TOOLS:
-        logger.info(f"Executing tool '{name}' with {len(arguments)} parameter(s)")
-        tool = TOOLS[name]
-
-        # Execute tool directly without model validation
-        # Clink-only mode: Tools don't require AI provider configuration
-        result = await tool.execute(arguments)
-        logger.info(f"Tool '{name}' execution completed")
-
-        # Log completion to activity file
-        try:
-            mcp_activity_logger = logging.getLogger("mcp_activity")
-            mcp_activity_logger.info(f"TOOL_COMPLETED: {name}")
-        except Exception:
-            pass
-        return result
-
-    # Handle unknown tool requests gracefully
-    else:
+    tool = TOOLS.get(name)
+    if tool is None:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-
-def parse_model_option(model_string: str) -> tuple[str, Optional[str]]:
-    """
-    Parse model:option format into model name and option.
-
-    Handles different formats:
-    - OpenRouter models: preserve :free, :beta, :preview suffixes as part of model name
-    - Ollama/Custom models: split on : to extract tags like :latest
-    - Consensus stance: extract options like :for, :against
-
-    Args:
-        model_string: String that may contain "model:option" format
-
-    Returns:
-        tuple: (model_name, option) where option may be None
-    """
-    if ":" in model_string and not model_string.startswith("http"):  # Avoid parsing URLs
-        # Check if this looks like an OpenRouter model (contains /)
-        if "/" in model_string and model_string.count(":") == 1:
-            # Could be openai/gpt-4:something - check what comes after colon
-            parts = model_string.split(":", 1)
-            suffix = parts[1].strip().lower()
-
-            # Known OpenRouter suffixes to preserve
-            if suffix in ["free", "beta", "preview"]:
-                return model_string.strip(), None
-
-        # For other patterns (Ollama tags, consensus stances), split normally
-        parts = model_string.split(":", 1)
-        model_name = parts[0].strip()
-        model_option = parts[1].strip() if len(parts) > 1 else None
-        return model_name, model_option
-    return model_string.strip(), None
-
-
-def get_follow_up_instructions(current_turn_count: int, max_turns: int = None) -> str:
-    """
-    Generate dynamic follow-up instructions based on conversation turn count.
-
-    Args:
-        current_turn_count: Current number of turns in the conversation
-        max_turns: Maximum allowed turns before conversation ends (defaults to MAX_CONVERSATION_TURNS)
-
-    Returns:
-        Follow-up instructions to append to the tool prompt
-    """
-    if max_turns is None:
-        from utils.conversation_memory import MAX_CONVERSATION_TURNS
-
-        max_turns = MAX_CONVERSATION_TURNS
-
-    if current_turn_count >= max_turns - 1:
-        # We're at or approaching the turn limit - no more follow-ups
-        return """
-IMPORTANT: This is approaching the final exchange in this conversation thread.
-Do NOT include any follow-up questions in your response. Provide your complete
-final analysis and recommendations."""
-    else:
-        # Normal follow-up instructions
-        remaining_turns = max_turns - current_turn_count - 1
-        return f"""
-
-CONVERSATION CONTINUATION: You can continue this discussion with the agent! ({remaining_turns} exchanges remaining)
-
-Feel free to ask clarifying questions or suggest areas for deeper exploration naturally within your response.
-If something needs clarification or you'd benefit from additional context, simply mention it conversationally.
-
-IMPORTANT: When you suggest follow-ups or ask questions, you MUST explicitly instruct the agent to use the continuation_id
-to respond. Use clear, direct language based on urgency:
-
-For optional follow-ups: "Please continue this conversation using the continuation_id from this response if you'd "
-"like to explore this further."
-
-For needed responses: "Please respond using the continuation_id from this response - your input is needed to proceed."
-
-For essential/critical responses: "RESPONSE REQUIRED: Please immediately continue using the continuation_id from "
-"this response. Cannot proceed without your clarification/input."
-
-This ensures the agent knows both HOW to maintain the conversation thread AND whether a response is optional, "
-"needed, or essential.
-
-The tool will automatically provide a continuation_id in the structured response that the agent can use in subsequent
-tool calls to maintain full conversation context across multiple exchanges.
-
-Remember: Only suggest follow-ups when they would genuinely add value to the discussion, and always instruct "
-"The agent to use the continuation_id when you do."""
-
-
-async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any]:
-    """
-    Reconstruct conversation context for stateless-to-stateful thread continuation.
-
-    This is a critical function that transforms the inherently stateless MCP protocol into
-    stateful multi-turn conversations. It loads persistent conversation state from in-memory
-    storage and rebuilds complete conversation context using the sophisticated dual prioritization
-    strategy implemented in the conversation memory system.
-
-    CONTEXT RECONSTRUCTION PROCESS:
-
-    1. THREAD RETRIEVAL: Loads complete ThreadContext from storage using continuation_id
-       - Includes all conversation turns with tool attribution
-       - Preserves file references and cross-tool context
-       - Handles conversation chains across multiple linked threads
-
-    2. CONVERSATION HISTORY BUILDING: Uses build_conversation_history() to create
-       comprehensive context with intelligent prioritization:
-
-       FILE PRIORITIZATION (Newest-First Throughout):
-       - When same file appears in multiple turns, newest reference wins
-       - File embedding prioritizes recent versions, excludes older duplicates
-       - Token budget management ensures most relevant files are preserved
-
-       CONVERSATION TURN PRIORITIZATION (Dual Strategy):
-       - Collection Phase: Processes turns newest-to-oldest for token efficiency
-       - Presentation Phase: Presents turns chronologically for LLM understanding
-       - Ensures recent context is preserved when token budget is constrained
-
-    3. CONTEXT INJECTION: Embeds reconstructed history into tool request arguments
-       - Conversation history becomes part of the tool's prompt context
-       - Files referenced in previous turns are accessible to current tool
-       - Cross-tool knowledge transfer is seamless and comprehensive
-
-    4. TOKEN BUDGET MANAGEMENT: Applies model-specific token allocation
-       - Balances conversation history vs. file content vs. response space
-       - Gracefully handles token limits with intelligent exclusion strategies
-       - Preserves most contextually relevant information within constraints
-
-    CROSS-TOOL CONTINUATION SUPPORT:
-    This function enables seamless handoffs between different tools:
-    - Analyze tool → Debug tool: Full file context and analysis preserved
-    - Chat tool → CodeReview tool: Conversation context maintained
-    - Any tool → Any tool: Complete cross-tool knowledge transfer
-
-    ERROR HANDLING & RECOVERY:
-    - Thread expiration: Provides clear instructions for conversation restart
-    - Storage unavailability: Graceful degradation with error messaging
-    - Invalid continuation_id: Security validation and user-friendly errors
-
-    Args:
-        arguments: Original request arguments dictionary containing:
-                  - continuation_id (required): UUID of conversation thread to resume
-                  - Other tool-specific arguments that will be preserved
-
-    Returns:
-        dict[str, Any]: Enhanced arguments dictionary with conversation context:
-        - Original arguments preserved
-        - Conversation history embedded in appropriate format for tool consumption
-        - File context from previous turns made accessible
-        - Cross-tool knowledge transfer enabled
-
-    Raises:
-        ValueError: When continuation_id is invalid, thread not found, or expired
-                   Includes user-friendly recovery instructions
-
-    Performance Characteristics:
-        - O(1) thread lookup in memory
-        - O(n) conversation history reconstruction where n = number of turns
-        - Intelligent token budgeting prevents context window overflow
-        - Optimized file deduplication minimizes redundant content
-
-    Example Usage Flow:
-        1. CLI: "Continue analyzing the security issues" + continuation_id
-        2. reconstruct_thread_context() loads previous analyze conversation
-        3. Debug tool receives full context including previous file analysis
-        4. Debug tool can reference specific findings from analyze tool
-        5. Natural cross-tool collaboration without context loss
-    """
-    from utils.conversation_memory import add_turn, build_conversation_history, get_thread
-
-    continuation_id = arguments["continuation_id"]
-
-    # Get thread context from storage
-    logger.debug(f"[CONVERSATION_DEBUG] Looking up thread {continuation_id} in storage")
-    context = get_thread(continuation_id)
-    if not context:
-        logger.warning(f"Thread not found: {continuation_id}")
-        logger.debug(f"[CONVERSATION_DEBUG] Thread {continuation_id} not found in storage or expired")
-
-        # Log to activity file for monitoring
-        try:
-            mcp_activity_logger = logging.getLogger("mcp_activity")
-            mcp_activity_logger.info(f"CONVERSATION_ERROR: Thread {continuation_id} not found or expired")
-        except Exception:
-            pass
-
-        # Return error asking CLI to restart conversation with full context
-        raise ValueError(
-            f"Conversation thread '{continuation_id}' was not found or has expired. "
-            f"This may happen if the conversation was created more than 3 hours ago or if the "
-            f"server was restarted. "
-            f"Please restart the conversation by providing your full question/prompt without the "
-            f"continuation_id parameter. "
-            f"This will create a new conversation thread that can continue with follow-up exchanges."
-        )
-
-    # Add user's new input to the conversation
-    user_prompt = arguments.get("prompt", "")
-    if user_prompt:
-        # Capture files referenced in this turn
-        user_files = arguments.get("absolute_file_paths") or []
-        logger.debug(f"[CONVERSATION_DEBUG] Adding user turn to thread {continuation_id}")
-        from utils.token_utils import estimate_tokens
-
-        user_prompt_tokens = estimate_tokens(user_prompt)
-        logger.debug(
-            f"[CONVERSATION_DEBUG] User prompt length: {len(user_prompt)} chars (~{user_prompt_tokens:,} tokens)"
-        )
-        logger.debug(f"[CONVERSATION_DEBUG] User files: {user_files}")
-        success = add_turn(continuation_id, "user", user_prompt, files=user_files)
-        if not success:
-            logger.warning(f"Failed to add user turn to thread {continuation_id}")
-            logger.debug("[CONVERSATION_DEBUG] Failed to add user turn - thread may be at turn limit or expired")
-        else:
-            logger.debug(f"[CONVERSATION_DEBUG] Successfully added user turn to thread {continuation_id}")
-
-    # Create model context early to use for history building
-    from utils.model_context import ModelContext, get_available_model_names, get_preferred_fallback_model
-
-    tool = TOOLS.get(context.tool_name)
-    requires_model = tool.requires_model() if tool else True
-
-    # Check if we should use the model from the previous conversation turn
-    model_from_args = arguments.get("model")
-    if requires_model and not model_from_args and context.turns:
-        # Find the last assistant turn to get the model used
-        for turn in reversed(context.turns):
-            if turn.role == "assistant" and turn.model_name:
-                arguments["model"] = turn.model_name
-                logger.debug(f"[CONVERSATION_DEBUG] Using model from previous turn: {turn.model_name}")
-                break
-
-    # Resolve an effective model for context reconstruction when DEFAULT_MODEL=auto
-    model_context = arguments.get("_model_context")
-
-    def resolve_fallback_model() -> str | None:
-        fallback_model = None
-        if tool is not None:
-            try:
-                fallback_model = get_preferred_fallback_model(tool.get_model_category())
-            except Exception as fallback_exc:  # pragma: no cover - defensive log
-                logger.debug(
-                    f"[CONVERSATION_DEBUG] Unable to resolve fallback model for {context.tool_name}: {fallback_exc}"
-                )
-
-        if fallback_model is None:
-            available_models = get_available_model_names()
-            if available_models:
-                fallback_model = available_models[0]
-
-        return fallback_model
-
-    if requires_model:
-        if model_context is None:
-            try:
-                model_context = ModelContext.from_arguments(arguments)
-                arguments.setdefault("_resolved_model_name", model_context.model_name)
-            except ValueError as exc:
-                fallback_model = resolve_fallback_model()
-                if fallback_model is None:
-                    raise
-
-                logger.debug(
-                    f"[CONVERSATION_DEBUG] Falling back to model '{fallback_model}' for context reconstruction after error: {exc}"
-                )
-                model_context = ModelContext(fallback_model)
-                arguments["_model_context"] = model_context
-                arguments["_resolved_model_name"] = fallback_model
-
-        if model_context.model_name.lower() == "auto":
-            fallback_model = resolve_fallback_model()
-            if fallback_model is None:
-                raise ValueError(
-                    "Conversation continuation failed: no available models detected for context reconstruction."
-                )
-
-            logger.debug(
-                f"[CONVERSATION_DEBUG] Auto model requested; swapping to '{fallback_model}' for context reconstruction"
-            )
-            model_context = ModelContext(fallback_model)
-            arguments["_model_context"] = model_context
-            arguments["_resolved_model_name"] = fallback_model
-    else:
-        if model_context is None or model_context.model_name.lower() == "auto":
-            fallback_model = resolve_fallback_model()
-            if fallback_model is None:
-                raise ValueError(
-                    "Conversation continuation failed: no available models detected for context reconstruction."
-                )
-
-            logger.debug(
-                f"[CONVERSATION_DEBUG] Using fallback model '{fallback_model}' for context reconstruction of tool without model requirement"
-            )
-            model_context = ModelContext(fallback_model)
-            arguments["_model_context"] = model_context
-            arguments["_resolved_model_name"] = fallback_model
-
-    # Build conversation history with model-specific limits
-    logger.debug(f"[CONVERSATION_DEBUG] Building conversation history for thread {continuation_id}")
-    logger.debug(f"[CONVERSATION_DEBUG] Thread has {len(context.turns)} turns, tool: {context.tool_name}")
-    logger.debug(f"[CONVERSATION_DEBUG] Using model: {model_context.model_name}")
-    conversation_history, conversation_tokens = build_conversation_history(context, model_context)
-    logger.debug(f"[CONVERSATION_DEBUG] Conversation history built: {conversation_tokens:,} tokens")
-    logger.debug(
-        f"[CONVERSATION_DEBUG] Conversation history length: {len(conversation_history)} chars (~{conversation_tokens:,} tokens)"
-    )
-
-    # Add dynamic follow-up instructions based on turn count
-    follow_up_instructions = get_follow_up_instructions(len(context.turns))
-    logger.debug(f"[CONVERSATION_DEBUG] Follow-up instructions added for turn {len(context.turns)}")
-
-    # All tools now use standardized 'prompt' field
-    original_prompt = arguments.get("prompt", "")
-    logger.debug("[CONVERSATION_DEBUG] Extracting user input from 'prompt' field")
-    original_prompt_tokens = estimate_tokens(original_prompt) if original_prompt else 0
-    logger.debug(
-        f"[CONVERSATION_DEBUG] User input length: {len(original_prompt)} chars (~{original_prompt_tokens:,} tokens)"
-    )
-
-    # Merge original context with new prompt and follow-up instructions
-    if conversation_history:
-        enhanced_prompt = (
-            f"{conversation_history}\n\n=== NEW USER INPUT ===\n{original_prompt}\n\n{follow_up_instructions}"
-        )
-    else:
-        enhanced_prompt = f"{original_prompt}\n\n{follow_up_instructions}"
-
-    # Update arguments with enhanced context and remaining token budget
-    enhanced_arguments = arguments.copy()
-
-    # Store the enhanced prompt in the prompt field
-    enhanced_arguments["prompt"] = enhanced_prompt
-    # Store the original user prompt separately for size validation
-    enhanced_arguments["_original_user_prompt"] = original_prompt
-    logger.debug("[CONVERSATION_DEBUG] Storing enhanced prompt in 'prompt' field")
-    logger.debug("[CONVERSATION_DEBUG] Storing original user prompt in '_original_user_prompt' field")
-
-    # Calculate remaining token budget based on current model
-    # (model_context was already created above for history building)
-    token_allocation = model_context.calculate_token_allocation()
-
-    # Calculate remaining tokens for files/new content
-    # History has already consumed some of the content budget
-    remaining_tokens = token_allocation.content_tokens - conversation_tokens
-    enhanced_arguments["_remaining_tokens"] = max(0, remaining_tokens)  # Ensure non-negative
-    enhanced_arguments["_model_context"] = model_context  # Pass context for use in tools
-
-    logger.debug("[CONVERSATION_DEBUG] Token budget calculation:")
-    logger.debug(f"[CONVERSATION_DEBUG]   Model: {model_context.model_name}")
-    logger.debug(f"[CONVERSATION_DEBUG]   Total capacity: {token_allocation.total_tokens:,}")
-    logger.debug(f"[CONVERSATION_DEBUG]   Content allocation: {token_allocation.content_tokens:,}")
-    logger.debug(f"[CONVERSATION_DEBUG]   Conversation tokens: {conversation_tokens:,}")
-    logger.debug(f"[CONVERSATION_DEBUG]   Remaining tokens: {remaining_tokens:,}")
-
-    # Merge original context parameters (files, etc.) with new request
-    if context.initial_context:
-        logger.debug(f"[CONVERSATION_DEBUG] Merging initial context with {len(context.initial_context)} parameters")
-        for key, value in context.initial_context.items():
-            if key not in enhanced_arguments and key not in ["temperature", "thinking_mode", "model"]:
-                enhanced_arguments[key] = value
-                logger.debug(f"[CONVERSATION_DEBUG] Merged initial context param: {key}")
-
-    logger.info(f"Reconstructed context for thread {continuation_id} (turn {len(context.turns)})")
-    logger.debug(f"[CONVERSATION_DEBUG] Final enhanced arguments keys: {list(enhanced_arguments.keys())}")
-
-    if "absolute_file_paths" in enhanced_arguments:
-        logger.debug(
-            f"[CONVERSATION_DEBUG] Final files in enhanced arguments: {enhanced_arguments['absolute_file_paths']}"
-        )
-
-    # Log to activity file for monitoring
+    logger.info(f"Executing tool '{name}' with {len(args)} parameter(s)")
+    result = await tool.execute(args)
+    logger.info(f"Tool '{name}' execution completed")
     try:
         mcp_activity_logger = logging.getLogger("mcp_activity")
-        mcp_activity_logger.info(
-            f"CONVERSATION_CONTINUATION: Thread {continuation_id} turn {len(context.turns)} - "
-            f"{len(context.turns)} previous turns loaded"
-        )
+        mcp_activity_logger.info(f"TOOL_COMPLETED: {name}")
     except Exception:
         pass
-
-    return enhanced_arguments
-
-
-@server.list_prompts()
-async def handle_list_prompts() -> list[Prompt]:
-    """
-    List all available prompts for CLI Code shortcuts.
-
-    This handler returns prompts that enable shortcuts like /pal:thinkdeeper.
-    We automatically generate prompts from all tools (1:1 mapping) plus add
-    a few marketing aliases with richer templates for commonly used tools.
-
-    Returns:
-        List of Prompt objects representing all available prompts
-    """
-    logger.debug("MCP client requested prompt list")
-    prompts = []
-
-    # Add a prompt for each tool with rich templates
-    for tool_name, tool in TOOLS.items():
-        if tool_name in PROMPT_TEMPLATES:
-            # Use the rich template
-            template_info = PROMPT_TEMPLATES[tool_name]
-            prompts.append(
-                Prompt(
-                    name=template_info["name"],
-                    description=template_info["description"],
-                    arguments=[],  # MVP: no structured args
-                )
-            )
-        else:
-            # Fallback for any tools without templates (shouldn't happen)
-            prompts.append(
-                Prompt(
-                    name=tool_name,
-                    description=f"Use {tool.name} tool",
-                    arguments=[],
-                )
-            )
-
-    # Add special "continue" prompt
-    prompts.append(
-        Prompt(
-            name="continue",
-            description="Continue the previous conversation using the chat tool",
-            arguments=[],
-        )
-    )
-
-    logger.debug(f"Returning {len(prompts)} prompts to MCP client")
-    return prompts
+    return result
 
 
-@server.get_prompt()
-async def handle_get_prompt(name: str, arguments: dict[str, Any] = None) -> GetPromptResult:
-    """
-    Get prompt details and generate the actual prompt text.
-
-    This handler is called when a user invokes a prompt (e.g., /pal:thinkdeeper or /pal:chat:gpt5).
-    It generates the appropriate text that CLI will then use to call the
-    underlying tool.
-
-    Supports structured prompt names like "chat:gpt5" where:
-    - "chat" is the tool name
-    - "gpt5" is the model to use
-
-    Args:
-        name: The name of the prompt to execute (can include model like "chat:gpt5")
-        arguments: Optional arguments for the prompt (e.g., model, thinking_mode)
-
-    Returns:
-        GetPromptResult with the prompt details and generated message
-
-    Raises:
-        ValueError: If the prompt name is unknown
-    """
-    logger.debug(f"MCP client requested prompt: {name} with args: {arguments}")
-
-    # Handle special "continue" case
-    if name.lower() == "continue":
-        # This is "/pal:continue" - use chat tool as default for continuation
-        tool_name = "chat"
-        template_info = {
-            "name": "continue",
-            "description": "Continue the previous conversation",
-            "template": "Continue the conversation",
-        }
-        logger.debug("Using /pal:continue - defaulting to chat tool")
-    else:
-        # Find the corresponding tool by checking prompt names
-        tool_name = None
-        template_info = None
-
-        # Check if it's a known prompt name
-        for t_name, t_info in PROMPT_TEMPLATES.items():
-            if t_info["name"] == name:
-                tool_name = t_name
-                template_info = t_info
-                break
-
-        # If not found, check if it's a direct tool name
-        if not tool_name and name in TOOLS:
-            tool_name = name
-            template_info = {
-                "name": name,
-                "description": f"Use {name} tool",
-                "template": f"Use {name}",
-            }
-
-        if not tool_name:
-            logger.error(f"Unknown prompt requested: {name}")
-            raise ValueError(f"Unknown prompt: {name}")
-
-    # Get the template
-    template = template_info.get("template", f"Use {tool_name}")
-
-    # Safe template expansion with defaults
-    final_model = arguments.get("model", "auto") if arguments else "auto"
-
-    prompt_args = {
-        "model": final_model,
-        "thinking_mode": arguments.get("thinking_mode", "medium") if arguments else "medium",
-    }
-
-    logger.debug(f"Using model '{final_model}' for prompt '{name}'")
-
-    # Safely format the template
-    try:
-        prompt_text = template.format(**prompt_args)
-    except KeyError as e:
-        logger.warning(f"Missing template argument {e} for prompt {name}, using raw template")
-        prompt_text = template  # Fallback to raw template
-
-    # Generate tool call instruction
-    if name.lower() == "continue":
-        # "/pal:continue" case
-        tool_instruction = (
-            f"Continue the previous conversation using the {tool_name} tool. "
-            "CRITICAL: You MUST provide the continuation_id from the previous response to maintain conversation context. "
-            "Additionally, you should reuse the same model that was used in the previous exchange for consistency, unless "
-            "the user specifically asks for a different model name to be used."
-        )
-    else:
-        # Simple prompt case
-        tool_instruction = prompt_text
-
-    return GetPromptResult(
-        prompt=Prompt(
-            name=name,
-            description=template_info["description"],
-            arguments=[],
-        ),
-        messages=[
-            PromptMessage(
-                role="user",
-                content={"type": "text", "text": tool_instruction},
-            )
-        ],
-    )
-
-
-async def main():
-    """
-    Main entry point for the MCP server (clink-only mode).
-
-    Starts the server using stdio transport. The server will continue running
-    until the client disconnects or an error occurs.
-
-    The server communicates via standard input/output streams using the
-    MCP protocol's JSON-RPC message format.
-
-    Clink-only mode: No AI provider configuration or API keys required.
-    """
-    # Get the current event loop
+async def main() -> None:
+    """Start MCP server over stdio transport."""
     loop = asyncio.get_running_loop()
-
-    # Set up signal handlers for graceful shutdown
     setup_signal_handlers(loop)
 
-    # Log startup message
     logger.info("AI CLI Bridge starting up...")
     logger.info(f"Log level: {log_level}")
-
-    # Note: MCP client info will be logged during the protocol handshake
-    # (when handle_list_tools is called)
-
     logger.info(f"Available tools: {list(TOOLS.keys())}")
     logger.info("Server ready - waiting for tool requests...")
     logger.info("Clink-only mode: Forwarding requests to external AI CLIs")
 
-    # Run the server using stdio transport (standard input/output)
-    # This allows the server to be launched by MCP clients as a subprocess
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -1044,25 +222,20 @@ async def main():
                 server_version=__version__,
                 instructions="Use the clink tool to forward requests to configured AI CLIs.",
                 capabilities=ServerCapabilities(
-                    tools=ToolsCapability(),  # Advertise tool support capability
-                    prompts=PromptsCapability(),  # Advertise prompt support capability
+                    tools=ToolsCapability(),
                 ),
             ),
         )
 
 
-def run():
+def run() -> None:
     """Console script entry point for ai-cli-bridge."""
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # Handle graceful shutdown - clean up all child processes
         logger.info("KeyboardInterrupt received, cleaning up processes...")
-        # Import here to avoid circular dependency
         from clink.agents.base import cleanup_all_processes
 
-        # KeyboardInterrupt happens when the event loop is already stopped
-        # We need to create a new event loop for cleanup
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -1070,8 +243,8 @@ def run():
         finally:
             loop.close()
         logger.info("Shutdown complete")
-    except Exception as e:
-        logger.error(f"Unexpected error during shutdown: {e}")
+    except Exception as exc:
+        logger.error(f"Unexpected error during shutdown: {exc}")
         raise
 
 

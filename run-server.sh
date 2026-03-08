@@ -947,7 +947,7 @@ install_dependencies() {
     fi
 
     # Check required packages
-    local packages=("mcp" "google.genai" "openai" "pydantic" "dotenv")
+    local packages=("mcp" "httpx" "pydantic" "psutil" "dotenv")
     for package in "${packages[@]}"; do
         if ! check_package "$python_cmd" "$package"; then
             deps_needed=true
@@ -964,8 +964,9 @@ install_dependencies() {
     print_info "Setting up AI CLI Bridge..."
     echo "Installing required components:"
     echo "  • MCP protocol library"
-    echo "  • AI model connectors"
+    echo "  • HTTP client tooling"
     echo "  • Data validation tools"
+    echo "  • Process management tools"
     echo "  • Environment configuration"
     echo ""
 
@@ -1025,7 +1026,7 @@ install_dependencies() {
             echo "  $python_cmd -m pip install -r requirements.txt"
             echo ""
             echo "Or install individual packages:"
-            echo "  $python_cmd -m pip install mcp google-genai openai pydantic python-dotenv"
+            echo "  $python_cmd -m pip install mcp httpx pydantic psutil python-dotenv"
         fi
         return 1
     else
@@ -1066,26 +1067,6 @@ setup_env_file() {
     cp .env.example .env
     print_success "Created .env from .env.example"
 
-    # Update API keys from environment if present
-    local api_keys=(
-        "GEMINI_API_KEY:your_gemini_api_key_here"
-        "OPENAI_API_KEY:your_openai_api_key_here"
-        "XAI_API_KEY:your_xai_api_key_here"
-        "DIAL_API_KEY:your_dial_api_key_here"
-        "OPENROUTER_API_KEY:your_openrouter_api_key_here"
-    )
-
-    for key_pair in "${api_keys[@]}"; do
-        local key_name="${key_pair%%:*}"
-        local placeholder="${key_pair##*:}"
-        local key_value="${!key_name:-}"
-
-        if [[ -n "$key_value" ]]; then
-            sed "${SED_INPLACE_ARGS[@]}" "s/$placeholder/$key_value/" .env
-            print_success "Updated .env with $key_name from environment"
-        fi
-    done
-
     return 0
 }
 
@@ -1107,54 +1088,6 @@ migrate_env_file() {
     print_success "Migrated Docker URLs to localhost in .env"
     echo "  (Backup saved as .env.backup_*)"
 }
-
-# Check API keys and warn if missing (non-blocking)
-check_api_keys() {
-    local has_key=false
-    local api_keys=(
-        "GEMINI_API_KEY:your_gemini_api_key_here"
-        "OPENAI_API_KEY:your_openai_api_key_here"
-        "XAI_API_KEY:your_xai_api_key_here"
-        "DIAL_API_KEY:your_dial_api_key_here"
-        "OPENROUTER_API_KEY:your_openrouter_api_key_here"
-    )
-
-    for key_pair in "${api_keys[@]}"; do
-        local key_name="${key_pair%%:*}"
-        local placeholder="${key_pair##*:}"
-        local key_value="${!key_name:-}"
-
-        if [[ -n "$key_value" ]] && [[ "$key_value" != "$placeholder" ]]; then
-            print_success "$key_name configured"
-            has_key=true
-        fi
-    done
-
-    # Check custom API URL
-    if [[ -n "${CUSTOM_API_URL:-}" ]]; then
-        print_success "CUSTOM_API_URL configured: $CUSTOM_API_URL"
-        has_key=true
-    fi
-
-    if [[ "$has_key" == false ]]; then
-        print_warning "No API keys found in .env!"
-        echo ""
-        echo "The Python development environment will be set up, but you won't be able to use the MCP server until you add API keys."
-        echo ""
-        echo "To add API keys, edit .env and add at least one:"
-        echo "  GEMINI_API_KEY=your-actual-key"
-        echo "  OPENAI_API_KEY=your-actual-key"
-        echo "  XAI_API_KEY=your-actual-key"
-        echo "  DIAL_API_KEY=your-actual-key"
-        echo "  OPENROUTER_API_KEY=your-actual-key"
-        echo ""
-        print_info "You can continue with development setup and add API keys later."
-        echo ""
-    fi
-
-    return 0  # Always return success to continue setup
-}
-
 
 # ----------------------------------------------------------------------------
 # Environment Variable Parsing Function
@@ -1194,24 +1127,17 @@ parse_env_variables() {
 
     # If no .env file or no valid vars, fall back to environment variables
     if [[ -z "$env_vars" ]]; then
-        local api_keys=(
-            "GEMINI_API_KEY"
-            "OPENAI_API_KEY" 
-            "XAI_API_KEY"
-            "DIAL_API_KEY"
-            "OPENROUTER_API_KEY"
-            "CUSTOM_API_URL"
-            "CUSTOM_API_KEY"
-            "CUSTOM_MODEL_NAME"
-            "DISABLED_TOOLS"
+        local env_keys=(
+            "CLI_CLIENTS_CONFIG_PATH"
             "DEFAULT_MODEL"
             "LOG_LEVEL"
-            "DEFAULT_THINKING_MODE_THINKDEEP"
             "CONVERSATION_TIMEOUT_HOURS"
             "MAX_CONVERSATION_TURNS"
+            "MAX_MCP_OUTPUT_TOKENS"
+            "LOCALE"
         )
 
-        for key_name in "${api_keys[@]}"; do
+        for key_name in "${env_keys[@]}"; do
             local key_value="${!key_name:-}"
             if [[ -n "$key_value" && ! "$key_value" =~ ^your_.*_here$ ]]; then
                 env_vars+="$key_name=$key_value"$'\n'
@@ -1912,7 +1838,7 @@ CODExEOF
                     fi
                 done <<< "$env_vars"
             else
-                echo "GEMINI_API_KEY = \"your_gemini_api_key_here\""
+                echo "DEFAULT_MODEL = \"auto\""
             fi
             return 0
         fi
@@ -2450,7 +2376,7 @@ EOF
 
    [mcp_servers.pal.env]
    PATH = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:\$HOME/.local/bin:\$HOME/.cargo/bin:\$HOME/bin"
-   GEMINI_API_KEY = "your_gemini_api_key_here"
+   DEFAULT_MODEL = "auto"
 EOF
     echo ""
 }
@@ -2467,75 +2393,9 @@ display_setup_instructions() {
     echo ""
     print_success "PAL is ready to use!"
     
-    # Display enabled/disabled tools if DISABLED_TOOLS is configured
-    if [[ -n "${DISABLED_TOOLS:-}" ]]; then
-        echo ""
-        print_info "Tool Configuration:"
-        
-        # Dynamically discover all available tools from the tools directory
-        # Excludes: __pycache__, shared modules, models.py, listmodels.py, version.py
-        local all_tools=()
-        for tool_file in tools/*.py; do
-            if [[ -f "$tool_file" ]]; then
-                local tool_name=$(basename "$tool_file" .py)
-                # Skip non-tool files
-                if [[ "$tool_name" != "models" && "$tool_name" != "listmodels" && "$tool_name" != "version" && "$tool_name" != "__init__" ]]; then
-                    all_tools+=("$tool_name")
-                fi
-            fi
-        done
-        
-        # Convert DISABLED_TOOLS to array
-        IFS=',' read -ra disabled_array <<< "$DISABLED_TOOLS"
-        
-        # Trim whitespace from disabled tools
-        local disabled_tools=()
-        for tool in "${disabled_array[@]}"; do
-            disabled_tools+=("$(echo "$tool" | xargs)")
-        done
-        
-        # Determine enabled tools
-        local enabled_tools=()
-        for tool in "${all_tools[@]}"; do
-            local is_disabled=false
-            for disabled in "${disabled_tools[@]}"; do
-                if [[ "$tool" == "$disabled" ]]; then
-                    is_disabled=true
-                    break
-                fi
-            done
-            if [[ "$is_disabled" == false ]]; then
-                enabled_tools+=("$tool")
-            fi
-        done
-        
-        # Display enabled tools
-        echo ""
-        echo -e "  ${GREEN}Enabled Tools (${#enabled_tools[@]}):${NC}"
-        local enabled_list=""
-        for tool in "${enabled_tools[@]}"; do
-            if [[ -n "$enabled_list" ]]; then
-                enabled_list+=", "
-            fi
-            enabled_list+="$tool"
-        done
-        echo "    $enabled_list"
-        
-        # Display disabled tools
-        echo ""
-        echo -e "  ${YELLOW}Disabled Tools (${#disabled_tools[@]}):${NC}"
-        local disabled_list=""
-        for tool in "${disabled_tools[@]}"; do
-            if [[ -n "$disabled_list" ]]; then
-                disabled_list+=", "
-            fi
-            disabled_list+="$tool"
-        done
-        echo "    $disabled_list"
-        
-        echo ""
-        echo "  To enable more tools, edit the DISABLED_TOOLS variable in .env"
-    fi
+    echo ""
+    print_info "Tool Configuration:"
+    echo "  Enabled tools: clink, version"
 }
 
 # ----------------------------------------------------------------------------
@@ -2671,42 +2531,39 @@ main() {
         set +a
     fi
 
-    # Step 4: Check API keys (non-blocking - just warn if missing)
-    check_api_keys
-
-    # Step 5: Setup Python environment (uv-first approach)
+    # Step 4: Setup Python environment (uv-first approach)
     local python_cmd
     python_cmd=$(setup_environment) || exit 1
 
-    # Step 6: Install dependencies
+    # Step 5: Install dependencies
     install_dependencies "$python_cmd" || exit 1
 
-    # Step 7: Get absolute server path
+    # Step 6: Get absolute server path
     local script_dir=$(get_script_dir)
     local server_path="$script_dir/server.py"
 
-    # Step 8: Display setup instructions
+    # Step 7: Display setup instructions
     display_setup_instructions "$python_cmd" "$server_path"
 
-    # Step 9: Check Claude integrations
+    # Step 8: Check Claude integrations
     check_claude_cli_integration "$python_cmd" "$server_path"
     check_claude_desktop_integration "$python_cmd" "$server_path"
 
-    # Step 10: Check Gemini CLI integration
+    # Step 9: Check Gemini CLI integration
     check_gemini_cli_integration "$script_dir"
 
-    # Step 11: Check Codex CLI integration
+    # Step 10: Check Codex CLI integration
     check_codex_cli_integration
 
-    # Step 12: Check Qwen CLI integration
+    # Step 11: Check Qwen CLI integration
     check_qwen_cli_integration "$python_cmd" "$server_path"
 
-    # Step 13: Display log information
+    # Step 12: Display log information
     echo ""
     echo "Logs will be written to: $script_dir/$LOG_DIR/$LOG_FILE"
     echo ""
 
-    # Step 14: Handle command line arguments
+    # Step 13: Handle command line arguments
     if [[ "$arg" == "-f" ]] || [[ "$arg" == "--follow" ]]; then
         follow_logs
     else

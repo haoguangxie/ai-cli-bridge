@@ -40,7 +40,7 @@ def codex_agent():
     return CodexAgent(client), role
 
 
-async def _run_agent_with_process(monkeypatch, agent, role, process):
+async def _run_agent_with_process(monkeypatch, agent, role, process, *, extra_args=()):
     async def fake_create_subprocess_exec(*_args, **_kwargs):
         return process
 
@@ -49,7 +49,7 @@ async def _run_agent_with_process(monkeypatch, agent, role, process):
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(shutil, "which", fake_which)
-    return await agent.run(role=role, prompt="do something", files=[], images=[])
+    return await agent.run(role=role, prompt="do something", files=[], images=[], extra_args=extra_args)
 
 
 @pytest.mark.asyncio
@@ -75,3 +75,54 @@ async def test_codex_agent_propagates_invalid_json(monkeypatch, codex_agent):
 
     with pytest.raises(CLIAgentError):
         await _run_agent_with_process(monkeypatch, agent, role, process)
+
+
+@pytest.mark.asyncio
+async def test_codex_agent_filters_denied_extra_args(monkeypatch, codex_agent):
+    agent, role = codex_agent
+    stdout = b'{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+    process = DummyProcess(stdout=stdout, returncode=0)
+
+    result = await _run_agent_with_process(
+        monkeypatch,
+        agent,
+        role,
+        process,
+        extra_args=["--json", "--enable", "shell", "--worktree", "exec"],
+    )
+
+    # Internal reserved args remain, denied extra_args are removed, and allowed flag values are preserved.
+    assert result.sanitized_command.count("exec") == 2
+    assert result.sanitized_command.count("--json") == 1
+    assert "--enable" not in result.sanitized_command
+    assert "shell" not in result.sanitized_command
+    assert "--worktree" in result.sanitized_command
+    assert result.sanitized_command[result.sanitized_command.index("--worktree") + 1] == "exec"
+
+
+@pytest.mark.asyncio
+async def test_codex_agent_redacts_sensitive_extra_arg_values(monkeypatch, codex_agent):
+    agent, role = codex_agent
+    stdout = b'{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+    process = DummyProcess(stdout=stdout, returncode=0)
+
+    result = await _run_agent_with_process(
+        monkeypatch,
+        agent,
+        role,
+        process,
+        extra_args=[
+            "--api-key",
+            "very-secret-token",
+            "--session-token=abc123",
+            "--worktree",
+            "task-2",
+        ],
+    )
+
+    assert "--api-key" in result.sanitized_command
+    api_key_index = result.sanitized_command.index("--api-key")
+    assert result.sanitized_command[api_key_index + 1] == "[REDACTED]"
+    assert "--session-token=[REDACTED]" in result.sanitized_command
+    assert "--worktree" in result.sanitized_command
+    assert "task-2" in result.sanitized_command
