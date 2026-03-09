@@ -104,12 +104,14 @@ This enables true AI-to-AI collaboration across the entire tool ecosystem with o
 context preservation and natural conversation understanding.
 """
 
+import json
 import logging
 import os
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import BaseModel
@@ -149,6 +151,68 @@ except ValueError:
 
 CONVERSATION_TIMEOUT_SECONDS = CONVERSATION_TIMEOUT_HOURS * 3600
 
+# Persistence configuration
+CONVERSATIONS_DIR = Path(".conversations")
+PERSISTENCE_ENABLED = get_env("CONVERSATION_PERSISTENCE", "true").lower() == "true"
+
+
+class PersistentStorage:
+    """Thread-safe storage with disk persistence."""
+
+    def __init__(self, storage_dir: Path = CONVERSATIONS_DIR):
+        self._lock = threading.Lock()
+        self._store: dict[str, tuple[float, str]] = {}
+        self._storage_dir = storage_dir
+        if PERSISTENCE_ENABLED:
+            self._storage_dir.mkdir(parents=True, exist_ok=True)
+            self._load_from_disk()
+
+    def _load_from_disk(self) -> None:
+        """Load conversations from disk on startup."""
+        if not self._storage_dir.exists():
+            return
+        now = time.time()
+        for file_path in self._storage_dir.glob("*.json"):
+            try:
+                data = json.loads(file_path.read_text())
+                expires_at = data.get("expires_at", 0)
+                if expires_at > now:
+                    self._store[data["key"]] = (expires_at, data["value"])
+                else:
+                    file_path.unlink(missing_ok=True)
+            except Exception as e:
+                logger.warning(f"Failed to load conversation from {file_path}: {e}")
+
+    def _save_to_disk(self, key: str, expires_at: float, value: str) -> None:
+        """Save conversation to disk."""
+        if not PERSISTENCE_ENABLED:
+            return
+        try:
+            file_path = self._storage_dir / f"{key}.json"
+            file_path.write_text(json.dumps({"key": key, "expires_at": expires_at, "value": value}))
+        except Exception as e:
+            logger.warning(f"Failed to save conversation {key}: {e}")
+
+    def setex(self, key: str, ttl_seconds: int, value: str) -> None:
+        expires_at = time.time() + max(0, ttl_seconds)
+        with self._lock:
+            self._store[key] = (expires_at, value)
+            self._save_to_disk(key, expires_at, value)
+
+    def get(self, key: str) -> Optional[str]:
+        now = time.time()
+        with self._lock:
+            entry = self._store.get(key)
+            if not entry:
+                return None
+            expires_at, value = entry
+            if expires_at <= now:
+                self._store.pop(key, None)
+                if PERSISTENCE_ENABLED:
+                    (self._storage_dir / f"{key}.json").unlink(missing_ok=True)
+                return None
+            return value
+
 
 class InMemoryStorage:
     """Thread-safe in-memory storage with TTL support."""
@@ -175,7 +239,7 @@ class InMemoryStorage:
             return value
 
 
-_STORAGE_INSTANCE: Optional[InMemoryStorage] = None
+_STORAGE_INSTANCE: Optional[PersistentStorage] = None
 _STORAGE_LOCK = threading.Lock()
 
 
@@ -238,17 +302,17 @@ class ThreadContext(BaseModel):
 
 def get_storage():
     """
-    Get in-memory storage backend for conversation persistence.
+    Get persistent storage backend for conversation persistence.
 
     Returns:
-        InMemoryStorage: Thread-safe in-memory storage backend
+        PersistentStorage: Thread-safe storage with disk persistence
     """
     global _STORAGE_INSTANCE
 
     if _STORAGE_INSTANCE is None:
         with _STORAGE_LOCK:
             if _STORAGE_INSTANCE is None:
-                _STORAGE_INSTANCE = InMemoryStorage()
+                _STORAGE_INSTANCE = PersistentStorage()
 
     return _STORAGE_INSTANCE
 
