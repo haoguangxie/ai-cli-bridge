@@ -89,7 +89,7 @@ class BaseTool(ABC):
         pass
 
     def validate_file_paths(self, request) -> Optional[str]:
-        """Validate that all file paths in the request are absolute."""
+        """Validate file paths, auto-resolving relative paths to absolute."""
         file_fields = [
             "absolute_file_paths",
             "file",
@@ -103,10 +103,21 @@ class BaseTool(ABC):
                 if field_value is None:
                     continue
 
-                paths_to_check = field_value if isinstance(field_value, list) else [field_value]
-                for path in paths_to_check:
-                    if path and not os.path.isabs(path):
-                        return f"All file paths must be FULL absolute paths. Invalid path: '{path}'"
+                if isinstance(field_value, list):
+                    resolved = [
+                        os.path.join(os.getcwd(), p) if p and not os.path.isabs(p) else p
+                        for p in field_value
+                    ]
+                    try:
+                        setattr(request, field_name, resolved)
+                    except (AttributeError, ValueError):
+                        pass
+                else:
+                    if field_value and not os.path.isabs(field_value):
+                        try:
+                            setattr(request, field_name, os.path.join(os.getcwd(), field_value))
+                        except (AttributeError, ValueError):
+                            pass
 
         return None
 

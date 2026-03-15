@@ -939,10 +939,9 @@ Please provide a thoughtful, comprehensive response:"""
 
     def _validate_file_paths(self, request) -> Optional[str]:
         """
-        Validate that all file paths in the request are absolute paths.
+        Validate file paths in the request, auto-resolving relative paths to absolute.
 
-        This is a security measure to prevent path traversal attacks and ensure
-        proper access control. All file paths must be absolute (starting with '/').
+        Relative paths are resolved against os.getcwd(). Absolute paths are kept as-is.
 
         Args:
             request: The validated request object
@@ -955,13 +954,16 @@ Please provide a thoughtful, comprehensive response:"""
         # Check if request has absolute file paths attribute (legacy tools may still provide 'files')
         files = self.get_request_files(request)
         if files:
+            resolved = []
             for file_path in files:
                 if not os.path.isabs(file_path):
-                    return (
-                        f"Error: All file paths must be FULL absolute paths to real files / folders - DO NOT SHORTEN. "
-                        f"Received relative path: {file_path}\n"
-                        f"Please provide the full absolute path starting with '/' (must be FULL absolute paths to real files / folders - DO NOT SHORTEN)"
-                    )
+                    file_path = os.path.join(os.getcwd(), file_path)
+                resolved.append(file_path)
+            # Update the request's file list with resolved paths
+            try:
+                request.absolute_file_paths = resolved
+            except (AttributeError, ValueError):
+                pass
 
         return None
 

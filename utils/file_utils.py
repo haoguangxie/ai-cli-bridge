@@ -462,10 +462,9 @@ def resolve_and_validate_path(path_str: str) -> Path:
     # Step 1: Create a Path object
     user_path = Path(path_str)
 
-    # Step 2: Security Policy - Require absolute paths
-    # Relative paths could be interpreted differently depending on working directory
+    # Step 2: Auto-resolve relative paths to absolute using cwd
     if not user_path.is_absolute():
-        raise ValueError(f"Relative paths are not supported. Please provide an absolute path.\nReceived: {path_str}")
+        user_path = Path(os.getcwd()) / user_path
 
     # Step 3: Resolve the absolute path (follows symlinks, removes .. and .)
     # This is critical for security as it reveals the true destination of symlinks
