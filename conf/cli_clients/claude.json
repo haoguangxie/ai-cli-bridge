@@ -9,8 +9,8 @@
     "--disallowedTools",
     "Task"
   ],
-  "cpu_idle_timeout_seconds": 1800,
-  "timeout_seconds": 14400,
+  "cpu_idle_timeout_seconds": 18000,
+  "timeout_seconds": 144000,
   "env": {},
   "roles": {
     "default": {
