@@ -1,9 +1,11 @@
 import asyncio
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import clink.agents.base as base_module
 from clink.agents.base import CLIAgentError
 from clink.agents.codex import CodexAgent
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
@@ -18,6 +20,30 @@ class DummyProcess:
 
     async def communicate(self, _input=None):
         return self._stdout, self._stderr
+
+
+class _FakeCPUProcess:
+    def __init__(self, pid: int, totals: list[float]):
+        self.pid = pid
+        self._totals = iter(totals)
+        self._last_total = totals[-1]
+
+    def cpu_times(self):
+        try:
+            self._last_total = next(self._totals)
+        except StopIteration:
+            pass
+        return SimpleNamespace(user=self._last_total, system=0.0)
+
+
+class _FakeRootProcess(_FakeCPUProcess):
+    def __init__(self, pid: int, totals: list[float], children: list[_FakeCPUProcess]):
+        super().__init__(pid, totals)
+        self._children = children
+
+    def children(self, recursive=True):
+        assert recursive is True
+        return self._children
 
 
 @pytest.fixture()
@@ -126,3 +152,19 @@ async def test_codex_agent_redacts_sensitive_extra_arg_values(monkeypatch, codex
     assert "--session-token=[REDACTED]" in result.sanitized_command
     assert "--worktree" in result.sanitized_command
     assert "task-2" in result.sanitized_command
+
+
+def test_child_cpu_history_is_not_recounted_as_fake_delta(monkeypatch, codex_agent):
+    agent, _ = codex_agent
+    child = _FakeCPUProcess(pid=4243, totals=[100.0, 100.01, 100.04])
+    proc = _FakeRootProcess(pid=4242, totals=[10.0, 10.0, 10.0], children=[child])
+
+    monkeypatch.setattr(base_module.psutil, "Process", lambda pid: proc)
+
+    baseline = agent._get_total_cpu_time(proc.pid)
+    quiet_sample = agent._get_total_cpu_time(proc.pid)
+    active_sample = agent._get_total_cpu_time(proc.pid)
+
+    assert quiet_sample - baseline == pytest.approx(0.0)
+    assert active_sample - quiet_sample == pytest.approx(0.03, abs=1e-9)
+    assert active_sample == pytest.approx(10.03, abs=1e-9)

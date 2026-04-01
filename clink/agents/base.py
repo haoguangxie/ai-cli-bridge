@@ -218,6 +218,11 @@ class BaseCLIAgent:
         # Per-child CPU tracking for noise filtering
         # Maps child PID → last observed cumulative CPU time (user + system)
         self._child_cpu_prev: dict[int, float] = {}
+        # Tracks the cumulative child CPU time that passed interval filtering.
+        # This keeps _get_total_cpu_time() monotonic without re-adding a child's
+        # entire historical CPU time when it briefly crosses the noise floor.
+        self._filtered_child_cpu_total = 0.0
+        self._cpu_tracking_initialized = False
 
     async def run(
         self,
@@ -549,18 +554,19 @@ class BaseCLIAgent:
     # ------------------------------------------------------------------
 
     def _get_total_cpu_time(self, pid: int) -> float:
-        """Get total CPU time (user + system) for process and active children.
+        """Get a monotonic CPU counter for process and filtered child activity.
 
         Works on macOS/Linux/Windows unlike io_counters() which is Linux-only.
 
         **Noise filtering**: Each child process is tracked individually. Only
         children whose CPU delta since the last check exceeds CHILD_CPU_NOISE_FLOOR
-        are included in the total. This filters out MCP server event loop noise
+        are added to this counter. This filters out MCP server event loop noise
         (~0.001-0.005s/check) while correctly counting tool execution children
-        that do real work (>0.05s/check).
+        that do real work (>0.05s/check) without re-counting their historical CPU.
 
-        The main process (and its first direct child) are always fully counted
-        without noise filtering, as they represent the CLI itself.
+        The main process is always counted using its real cumulative CPU time.
+        Children contribute only their accepted interval delta, accumulated over
+        time, so callers can continue to derive `cpu_delta` via subtraction.
         """
         total = 0.0
         current_child_cpu: dict[int, float] = {}
@@ -585,12 +591,18 @@ class BaseCLIAgent:
                         current_child_cpu[child_pid] = child_total
 
                         # Compute per-child delta since last check
-                        prev = self._child_cpu_prev.get(child_pid, 0.0)
-                        delta = child_total - prev
+                        prev = self._child_cpu_prev.get(child_pid)
+                        if prev is None:
+                            # On the initial baseline sample we record the child's
+                            # current cumulative CPU without treating its history
+                            # as new activity. For children that appear after the
+                            # baseline, their current CPU time is the interval delta.
+                            delta = 0.0 if not self._cpu_tracking_initialized else child_total
+                        else:
+                            delta = max(child_total - prev, 0.0)
 
                         if delta >= CHILD_CPU_NOISE_FLOOR:
-                            # This child did real work — count its full CPU
-                            total += child_total
+                            self._filtered_child_cpu_total += delta
                         # else: noise-level CPU, skip this child's contribution
 
                     except (psutil.AccessDenied, psutil.NoSuchProcess):
@@ -602,8 +614,9 @@ class BaseCLIAgent:
 
         # Update tracking for next check (also prunes dead children)
         self._child_cpu_prev = current_child_cpu
+        self._cpu_tracking_initialized = True
 
-        return total
+        return total + self._filtered_child_cpu_total
 
     async def _communicate_with_activity_monitor(
         self,
@@ -642,6 +655,8 @@ class BaseCLIAgent:
         start_time = time.monotonic()
         # Reset per-child CPU tracking for this new process
         self._child_cpu_prev = {}
+        self._filtered_child_cpu_total = 0.0
+        self._cpu_tracking_initialized = False
         last_cpu_time = self._get_total_cpu_time(pid)
         last_activity_time = start_time
 
