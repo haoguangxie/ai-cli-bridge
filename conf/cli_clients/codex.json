@@ -5,7 +5,9 @@
     "--json",
     "--dangerously-bypass-approvals-and-sandbox",
     "--enable",
-    "web_search_request"
+    "web_search_request",
+    "-c",
+    "mcp_servers.ai-cli-bridge.enabled=false"
   ],
   "cpu_idle_timeout_seconds": 900,
   "timeout_seconds": 1800,

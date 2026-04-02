@@ -54,7 +54,12 @@ def codex_agent():
         name="codex",
         executable=["codex"],
         internal_args=["exec"],
-        config_args=["--json", "--dangerously-bypass-approvals-and-sandbox"],
+        config_args=[
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-c",
+            "mcp_servers.ai-cli-bridge.enabled=false",
+        ],
         env={},
         timeout_seconds=30,
         cpu_idle_timeout_seconds=60,
@@ -150,6 +155,35 @@ async def test_codex_agent_redacts_sensitive_extra_arg_values(monkeypatch, codex
     api_key_index = result.sanitized_command.index("--api-key")
     assert result.sanitized_command[api_key_index + 1] == "[REDACTED]"
     assert "--session-token=[REDACTED]" in result.sanitized_command
+    assert "--worktree" in result.sanitized_command
+    assert "task-2" in result.sanitized_command
+
+
+@pytest.mark.asyncio
+async def test_codex_agent_blocks_protected_mcp_config_override(monkeypatch, codex_agent):
+    agent, role = codex_agent
+    stdout = b'{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}'
+    process = DummyProcess(stdout=stdout, returncode=0)
+
+    result = await _run_agent_with_process(
+        monkeypatch,
+        agent,
+        role,
+        process,
+        extra_args=[
+            "-c",
+            "mcp_servers.ai-cli-bridge.enabled=true",
+            "--config=mcp_servers.ai-cli-bridge.command=\"python3 hacked.py\"",
+            "--worktree",
+            "task-2",
+        ],
+    )
+
+    assert result.sanitized_command.count("-c") == 1
+    config_index = result.sanitized_command.index("-c")
+    assert result.sanitized_command[config_index + 1] == "mcp_servers.ai-cli-bridge.enabled=false"
+    assert not any("mcp_servers.ai-cli-bridge.enabled=true" == arg for arg in result.sanitized_command)
+    assert not any("mcp_servers.ai-cli-bridge.command" in arg for arg in result.sanitized_command)
     assert "--worktree" in result.sanitized_command
     assert "task-2" in result.sanitized_command
 

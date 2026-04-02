@@ -210,6 +210,8 @@ class BaseCLIAgent:
         r"(?i)(token|secret|password|passwd|credential|api[-_]?key|access[-_]?key|private[-_]?key|bearer|auth)"
     )
     _REDACTED_VALUE: ClassVar[str] = "[REDACTED]"
+    _CONFIG_OVERRIDE_ARGS: ClassVar[frozenset[str]] = frozenset({"-c", "--config"})
+    _PROTECTED_CONFIG_PREFIXES: ClassVar[tuple[str, ...]] = ("mcp_servers.ai-cli-bridge",)
 
     def __init__(self, client: ResolvedCLIClient):
         self.client = client
@@ -480,6 +482,17 @@ class BaseCLIAgent:
             is_subcommand_position = index == 0 and not is_flag
             should_check_denylist = is_flag or is_subcommand_position
 
+            if arg_name in self._CONFIG_OVERRIDE_ARGS:
+                config_value, consumes_next = self._extract_config_override_value(extra_args, index, arg, has_inline_value)
+                if config_value and self._is_protected_config_override(config_value):
+                    removed.append(arg)
+                    if consumes_next:
+                        removed.append(config_value)
+                        index += 2
+                    else:
+                        index += 1
+                    continue
+
             if should_check_denylist and arg_name in self.DENIED_ARGS:
                 removed.append(arg)
                 if (
@@ -503,6 +516,26 @@ class BaseCLIAgent:
             self._logger.warning("Removed denied extra_args for CLI '%s': %s", self.client.name, removed_display)
 
         return filtered
+
+    def _extract_config_override_value(
+        self,
+        extra_args: Sequence[str],
+        index: int,
+        arg: str,
+        has_inline_value: bool,
+    ) -> tuple[str | None, bool]:
+        if has_inline_value:
+            _, value = arg.split("=", 1)
+            return value, False
+
+        if index + 1 >= len(extra_args):
+            return None, False
+
+        return extra_args[index + 1], True
+
+    def _is_protected_config_override(self, config_value: str) -> bool:
+        key = config_value.split("=", 1)[0].strip()
+        return any(key == prefix or key.startswith(f"{prefix}.") for prefix in self._PROTECTED_CONFIG_PREFIXES)
 
     def _sanitize_args_for_logging(self, args: Sequence[str]) -> list[str]:
         sanitized: list[str] = []

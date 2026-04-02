@@ -66,6 +66,8 @@ def test_registry_lists_roles():
         "--dangerously-bypass-approvals-and-sandbox",
         "--enable",
         "web_search_request",
+        "-c",
+        "mcp_servers.ai-cli-bridge.enabled=false",
     ]
 
 
