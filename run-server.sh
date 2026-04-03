@@ -1846,7 +1846,7 @@ PY
             echo "[mcp_servers.pal]"
             echo "command = \"bash\""
             echo "args = [\"-c\", \"for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge; done; echo 'uvx not found' >&2; exit 1\"]"
-            echo "tool_timeout_sec = 1800"
+            echo "tool_timeout_sec = 144000"
             echo ""
             echo "[mcp_servers.pal.env]"
             echo "PATH = \"$codex_env_path\""
@@ -1873,7 +1873,7 @@ cat <<CODExEOF
 [mcp_servers.pal]
 command = "sh"
 args = ["-c", "exec \$(which uvx 2>/dev/null || echo uvx) --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge"]
-tool_timeout_sec = 1800
+tool_timeout_sec = 144000
 
 [mcp_servers.pal.env]
 PATH = "$codex_env_path"
@@ -2427,6 +2427,7 @@ EOF
    [mcp_servers.pal]
    command = "bash"
    args = ["-c", "for p in \$(which uvx 2>/dev/null) \$HOME/.local/bin/uvx /opt/homebrew/bin/uvx /usr/local/bin/uvx uvx; do [ -x \\\"\$p\\\" ] && exec \\\"\$p\\\" --from git+https://github.com/BeehiveInnovations/ai-cli-bridge.git ai-cli-bridge; done; echo 'uvx not found' >&2; exit 1"]
+   tool_timeout_sec = 144000
 
    [mcp_servers.pal.env]
    PATH = "$codex_env_path"
