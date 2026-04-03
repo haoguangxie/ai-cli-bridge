@@ -7,6 +7,7 @@ This server exposes only two tools:
 """
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -32,6 +33,9 @@ from tools import CLinkTool, VersionTool  # noqa: E402
 from utils.env import get_env  # noqa: E402
 
 log_level = (get_env("LOG_LEVEL", "DEBUG") or "DEBUG").upper()
+SERVER_IDLE_TIMEOUT_SECONDS = float(get_env("MCP_SERVER_IDLE_TIMEOUT_SECONDS", "1800") or 1800)
+MIN_IDLE_POLL_SECONDS = 5.0
+MAX_IDLE_POLL_SECONDS = 30.0
 
 
 class LocalTimeFormatter(logging.Formatter):
@@ -95,11 +99,92 @@ logger = logging.getLogger(__name__)
 server: Server = Server("ai-cli-bridge")
 
 _shutdown_requested = False
+_last_activity_monotonic = time.monotonic()
+_inflight_requests = 0
 
 TOOLS = {
     "clink": CLinkTool(),
     "version": VersionTool(),
 }
+
+
+def _mark_activity(now: float | None = None) -> float:
+    """Record the last time the MCP server did useful work."""
+    global _last_activity_monotonic
+    _last_activity_monotonic = time.monotonic() if now is None else now
+    return _last_activity_monotonic
+
+
+def _begin_request(now: float | None = None) -> None:
+    """Track request lifecycle so idle shutdown never kills active tool work."""
+    global _inflight_requests
+    _inflight_requests += 1
+    _mark_activity(now)
+
+
+def _end_request(now: float | None = None) -> None:
+    """Mark request completion and refresh activity time for post-call idle windows."""
+    global _inflight_requests
+    if _inflight_requests > 0:
+        _inflight_requests -= 1
+    else:  # pragma: no cover - defensive guard for mismatched lifecycle bookkeeping
+        logger.warning("Request counter underflow while ending MCP request")
+    _mark_activity(now)
+
+
+def _idle_poll_seconds(idle_timeout_seconds: float) -> float:
+    return max(MIN_IDLE_POLL_SECONDS, min(MAX_IDLE_POLL_SECONDS, idle_timeout_seconds / 6.0))
+
+
+def _should_trigger_idle_shutdown(
+    now: float,
+    *,
+    last_activity_monotonic: float,
+    inflight_requests: int,
+    idle_timeout_seconds: float,
+) -> bool:
+    if idle_timeout_seconds <= 0:
+        return False
+    if inflight_requests > 0:
+        return False
+    return now - last_activity_monotonic >= idle_timeout_seconds
+
+
+def _trigger_idle_shutdown() -> None:
+    """Reuse the existing signal-based shutdown path so cleanup stays centralized."""
+    signum = signal.SIGTERM if hasattr(signal, "SIGTERM") else signal.SIGINT
+    signal.raise_signal(signum)
+
+
+async def _monitor_server_idle(idle_timeout_seconds: float, *, poll_interval: float | None = None) -> None:
+    """Exit stale MCP server processes after a quiet period with no in-flight requests."""
+    if idle_timeout_seconds <= 0:
+        logger.info("Server idle reaper disabled (MCP_SERVER_IDLE_TIMEOUT_SECONDS <= 0)")
+        return
+
+    poll_seconds = poll_interval if poll_interval is not None else _idle_poll_seconds(idle_timeout_seconds)
+    logger.info(
+        "Server idle reaper enabled: timeout=%ss poll=%ss",
+        idle_timeout_seconds,
+        poll_seconds,
+    )
+
+    while not _shutdown_requested:
+        await asyncio.sleep(poll_seconds)
+        now = time.monotonic()
+        if _should_trigger_idle_shutdown(
+            now,
+            last_activity_monotonic=_last_activity_monotonic,
+            inflight_requests=_inflight_requests,
+            idle_timeout_seconds=idle_timeout_seconds,
+        ):
+            idle_for = now - _last_activity_monotonic
+            logger.info(
+                "Server idle timeout reached after %.1fs without requests; initiating shutdown",
+                idle_for,
+            )
+            _trigger_idle_shutdown()
+            return
 
 
 def setup_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
@@ -136,6 +221,7 @@ def _request_shutdown(message: str) -> None:
 @server.list_tools()
 async def handle_list_tools() -> list[Tool]:
     """Return MCP tool metadata for clink and version."""
+    _mark_activity()
     logger.debug("MCP client requested tool list")
 
     # Best-effort MCP client logging during handshake.
@@ -177,29 +263,33 @@ async def handle_list_tools() -> list[Tool]:
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[TextContent]:
     """Route tool requests to clink/version handlers."""
+    _begin_request()
     args = arguments or {}
     logger.info(f"MCP tool call: {name}")
     logger.debug(f"MCP tool arguments: {list(args.keys())}")
 
     try:
-        mcp_activity_logger = logging.getLogger("mcp_activity")
-        mcp_activity_logger.info(f"TOOL_CALL: {name} with {len(args)} arguments")
-    except Exception:
-        pass
+        try:
+            mcp_activity_logger = logging.getLogger("mcp_activity")
+            mcp_activity_logger.info(f"TOOL_CALL: {name} with {len(args)} arguments")
+        except Exception:
+            pass
 
-    tool = TOOLS.get(name)
-    if tool is None:
-        return [TextContent(type="text", text=f"Unknown tool: {name}")]
+        tool = TOOLS.get(name)
+        if tool is None:
+            return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-    logger.info(f"Executing tool '{name}' with {len(args)} parameter(s)")
-    result = await tool.execute(args)
-    logger.info(f"Tool '{name}' execution completed")
-    try:
-        mcp_activity_logger = logging.getLogger("mcp_activity")
-        mcp_activity_logger.info(f"TOOL_COMPLETED: {name}")
-    except Exception:
-        pass
-    return result
+        logger.info(f"Executing tool '{name}' with {len(args)} parameter(s)")
+        result = await tool.execute(args)
+        logger.info(f"Tool '{name}' execution completed")
+        try:
+            mcp_activity_logger = logging.getLogger("mcp_activity")
+            mcp_activity_logger.info(f"TOOL_COMPLETED: {name}")
+        except Exception:
+            pass
+        return result
+    finally:
+        _end_request()
 
 
 async def main() -> None:
@@ -213,19 +303,25 @@ async def main() -> None:
     logger.info("Server ready - waiting for tool requests...")
     logger.info("Clink-only mode: Forwarding requests to external AI CLIs")
 
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="ai-cli-bridge",
-                server_version=__version__,
-                instructions="Use the clink tool to forward requests to configured AI CLIs.",
-                capabilities=ServerCapabilities(
-                    tools=ToolsCapability(),
+    idle_watchdog = asyncio.create_task(_monitor_server_idle(SERVER_IDLE_TIMEOUT_SECONDS))
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream,
+                write_stream,
+                InitializationOptions(
+                    server_name="ai-cli-bridge",
+                    server_version=__version__,
+                    instructions="Use the clink tool to forward requests to configured AI CLIs.",
+                    capabilities=ServerCapabilities(
+                        tools=ToolsCapability(),
+                    ),
                 ),
-            ),
-        )
+            )
+    finally:
+        idle_watchdog.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await idle_watchdog
 
 
 def run() -> None:
